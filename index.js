@@ -48,7 +48,6 @@ manager.spawn().then(() => {
 setInterval(() => {
   const req = https.get("https://bot.sakurahp.f5.si/", res => {
     res.resume(); // データ捨てる（重要）
-    console.log("[KeepAlive]", res.statusCode);
   });
 
   req.on("error", err => {
