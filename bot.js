@@ -487,7 +487,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'msgpin') {
-  await interaction.deferReply();
+  await interaction.deferReply({ ephemeral: true });
   const msg = interaction.options.getString('msg');
   const channelId = interaction.channel.id;
 
@@ -500,7 +500,7 @@ client.on('interactionCreate', async interaction => {
   const sent = await interaction.channel.send({ embeds: [embed] });
   await upsertPinned(channelId, sent.id, msg, interaction.user.tag);
 
-  return interaction.editReply({ content: '📌 メッセージを固定しました！', flags: MessageFlags.Ephemeral});
+  return interaction.editReply({ content: '📌 メッセージを固定しました！' });
 }
 
     if (commandName === 'unpin') {
