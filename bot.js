@@ -1209,7 +1209,7 @@ client.on("messageCreate", async message => {
 
   // shard 0 以外はDB触らない
 // shardが定義されていて、0以外なら弾く
-if (process.env.SHARD_ID && process.env.SHARD_ID !== "0") return;
+if (client.shard && client.shard.ids[0] !== 0) return;
   console.log("shard passed");
   // ===== AIチャンネル =====
   if (message.channel.Id === AI_CHANNEL_ID) {
