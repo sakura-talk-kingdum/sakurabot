@@ -1190,17 +1190,27 @@ async function handleAI(message) {
       .setFooter({ text: `📌 投稿者: ${pinData.author_name || '不明'}` })
       .setTimestamp();
 
-    const sent = await message.channel.send({ embeds: [embed] });
+  const sent = await message.channel.send({ embeds: [embed] })
+   .catch(err => {
+    console.error("PIN send failed:", err);
+    return null;
+  });
+
+if (!sent) return;
+
     await upsertPinned(message.channel.id, sent.id);
   } catch (err) {
     console.error('固定メッセージ更新エラー:', err);
   }
  }
 client.on("messageCreate", async message => {
+  console.log("messageCreate fired");
   if (message.author.bot) return;
 
   // shard 0 以外はDB触らない
-if (process.env.SHARD_ID === "0") {
+// shardが定義されていて、0以外なら弾く
+if (process.env.SHARD_ID && process.env.SHARD_ID !== "0") return;
+  console.log("shard passed");
   // ===== AIチャンネル =====
   if (message.channel.Id === AI_CHANNEL_ID) {
     return handleAI();
@@ -1211,7 +1221,6 @@ if (process.env.SHARD_ID === "0") {
 
   // ===== XP加算 =====
   await addUserExperience(message.author.id, "text");
-}
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
