@@ -23,11 +23,10 @@ const PORT = process.env.PORT || 3000;
 ===================== */
 const {
   DISCORD_CLIENT_ID,
-  DISCORD_CLIENT_SECRET,
-  DISCORD_REDIRECT_URI
+  DISCORD_CLIENT_SECRET
 } = process.env
 
-const DISCORD_REDIRECT_URI = https://bot.sakurahp.f5.si/gachas/auth/callback
+const DISCORD_REDIRECT_URI = 'https://bot.sakurahp.f5.si/gachas/auth/callback';
 
 // ガチャ管理者（Discord User ID）
 const GACHA_ADMINS = [
