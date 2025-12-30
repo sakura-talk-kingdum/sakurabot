@@ -16,7 +16,7 @@ app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 const PORT = process.env.PORT || 3000;
 
-const DISCORD_API = "https://discord.com/api";
+const DISCORD_API = "https://discord.com/api/v10";
 
 // ===== OAuth2 URL =====
 function adminOAuthURL() {
