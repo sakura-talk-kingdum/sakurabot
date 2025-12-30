@@ -188,14 +188,22 @@ document.getElementById('create-set-btn').addEventListener('click', async ()=>{
   const channel=document.getElementById('new-set-channel').value;
   const trigger=document.getElementById('new-set-trigger').value;
   if(!name||!channel||!trigger) return alert('全部入力して');
-  await fetch(`${API_PREFIX}/set/create`,{
+  await fetch(`${API_PREFIX}/sets/`,{
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({guild_id:'guild-id', name, channel_id:channel, trigger_word:trigger})
   });
   fetchSets();
 });
+  async function checkAuth() {
+    const res = await fetch('/gachas/auth/me');
+    if (res.status === 401) {
+      // 認証まだなら再読み込みしてクッキーを反映させる
+      window.location.reload();
+    }
+  }
 
+  checkAuth();
 fetchSets();
 </script>
 </main>
