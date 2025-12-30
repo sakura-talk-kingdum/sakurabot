@@ -661,22 +661,22 @@ app.post("/odai/add", async (req, res) => {
   res.redirect("/odai");
 });
 
-/* =====================
-  OAuth2
-===================== */
-app.get('/gachas/auth/login', (_req, res) => {
+app.get('/gachas/login', (req, res) => {
   const url =
     `https://discord.com/oauth2/authorize` +
     `?client_id=${DISCORD_CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}` +
-    `&response_type=code&scope=identify`
+    `&response_type=code` +
+    `&scope=identify`
+
   res.redirect(url)
 })
 
 app.get('/gachas/auth/callback', async (req, res) => {
-  const code = req.query.code
+  const { code } = req.query
   if (!code) return res.status(400).send('no code')
 
+  // token取得
   const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -692,43 +692,51 @@ app.get('/gachas/auth/callback', async (req, res) => {
   const token = await tokenRes.json()
   if (!token.access_token) return res.status(401).send('oauth failed')
 
+  // user取得
   const userRes = await fetch('https://discord.com/api/users/@me', {
     headers: { Authorization: `Bearer ${token.access_token}` }
   })
   const user = await userRes.json()
 
+  // 管理者チェック
   if (!GACHA_ADMINS.includes(user.id)) {
     return res.status(403).send('not admin')
   }
 
+  // session発行
   const sid = newSession(user.id, user.username)
 
   res.cookie('sid', sid, {
     httpOnly: true,
     secure: true,
     sameSite: 'Strict',
-    maxAge: 1000 * 60 * 60 * 6
+    maxAge: 1000 * 60 * 60 * 6 // 6時間
   })
 
   res.redirect('/gachas/dashboard')
 })
 
-app.get('/gachas/auth/logout', requireAuth, (req, res) => {
+app.post('/gachas/logout', requireAuth, (req, res) => {
   sessions.delete(req.cookies.sid)
   res.clearCookie('sid')
   res.json({ ok: true })
 })
 
-app.get('/gachas/auth/me', requireAuth, (req, res) => {
+app.get('/gachas/me', requireAuth, (req, res) => {
   res.json(req.user)
 })
 
-/* =====================
-  ガチャセット管理
-===================== */
+app.get('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from('gacha_sets')
+    .select('*')
+    .order('created_at', { ascending: false })
 
-// 作成
-app.post('/gachas/set/create', requireAuth, requireAdmin, async (req, res) => {
+  if (error) return res.status(500).json(error)
+  res.json(data)
+})
+
+app.post('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
   const { guild_id, name, channel_id, trigger_word } = req.body
 
   const { data, error } = await supabase
@@ -743,88 +751,126 @@ app.post('/gachas/set/create', requireAuth, requireAdmin, async (req, res) => {
     .select()
     .single()
 
-  if (error) return res.status(500).json({ error })
-  res.json(data)
+  if (error) return res.status(500).json(error)
+  res.status(201).json(data)
 })
 
-// 有効/無効（複数同時OK）
-app.post('/gachas/set/toggle', requireAuth, requireAdmin, async (req, res) => {
-  const { set_id, enabled } = req.body
+app.put('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) => {
+  const { setId } = req.params
 
   const { error } = await supabase
     .from('gacha_sets')
-    .update({ enabled })
-    .eq('id', set_id)
+    .update(req.body)
+    .eq('id', setId)
 
-  if (error) return res.status(500).json({ error })
+  if (error) return res.status(500).json(error)
   res.json({ ok: true })
 })
 
-// 一覧
-app.get('/gachas/set/list', requireAuth, requireAdmin, async (req, res) => {
-  const { guild_id } = req.query
+app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) => {
+  const { setId } = req.params
+
+  const { error } = await supabase
+    .from('gacha_sets')
+    .delete()
+    .eq('id', setId)
+
+  if (error) return res.status(500).json(error)
+  res.json({ ok: true })
+})
+
+app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res) => {
+  const { setId } = req.params
 
   const { data, error } = await supabase
-    .from('gacha_sets')
+    .from('gacha_items')
     .select('*')
-    .eq('guild_id', guild_id)
-    .order('created_at', { ascending: false })
+    .eq('set_id', setId)
+    .order('display_id')
 
-  if (error) return res.status(500).json({ error })
+  if (error) return res.status(500).json(error)
   res.json(data)
 })
 
-/* =====================
-  アイテム & 確率自動制御
-===================== */
+app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res) => {
+  const { setId } = req.params
+  const { display_id, name, rarity, amount } = req.body
 
-// セットに一括登録（HTML用）
-app.post('/gachas/set/items', requireAuth, requireAdmin, async (req, res) => {
-  const { set_id, items } = req.body
+  const { error } = await supabase.from('gacha_items').insert({
+    set_id: setId,
+    display_id,
+    name,
+    rarity,
+    amount
+  })
 
-  await supabase.from('gacha_items').delete().eq('set_id', set_id)
+  if (error) return res.status(500).json(error)
 
-  for (const item of items) {
-    await supabase.from('gacha_items').insert({
-      set_id,
-      display_id: item.display_id,
-      name: item.name,
-      rarity: item.rarity,
-      amount: item.amount
-    })
-  }
+  await recalcProbabilitiesBySet(setId)
+  res.status(201).json({ ok: true })
+})
 
-  await recalcProbabilitiesBySet(set_id)
+app.put('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async (req, res) => {
+  const { setId, itemId } = req.params
 
+  const { error } = await supabase
+    .from('gacha_items')
+    .update(req.body)
+    .eq('id', itemId)
+    .eq('set_id', setId)
+
+  if (error) return res.status(500).json(error)
+
+  await recalcProbabilitiesBySet(setId)
   res.json({ ok: true })
 })
 
-// 排出率再計算（完全自動）
-async function recalcProbabilitiesBySet(set_id) {
-  const { data: items } = await supabase
+app.delete('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async (req, res) => {
+  const { setId, itemId } = req.params
+
+  const { error } = await supabase
+    .from('gacha_items')
+    .delete()
+    .eq('id', itemId)
+    .eq('set_id', setId)
+
+  if (error) return res.status(500).json(error)
+
+  await recalcProbabilitiesBySet(setId)
+  res.json({ ok: true })
+})
+
+app.use('/gachas/dashboard', requireAuth, requireAdmin, express.static(path.join(process.cwd(), 'public', 'dashboard')));
+
+async function recalcProbabilitiesBySet(setId){
+  const { data: items, error } = await supabase
     .from('gacha_items')
     .select('rarity, amount')
-    .eq('set_id', set_id)
+    .eq('set_id', setId);
+  if(error) throw new Error(error.message);
+  if(!items || items.length === 0) return {};
 
-  let total = 0
-  const sum = {}
+  let totalWeight = 0;
+  const raritySum = {};
 
-  for (const i of items) {
-    const w = RARITY_WEIGHT[i.rarity] ?? 1
-    const v = i.amount * w
-    sum[i.rarity] = (sum[i.rarity] || 0) + v
-    total += v
+  for(const item of items){
+    const w = RARITY_WEIGHT[item.rarity] || 1;
+    const v = item.amount * w;
+    raritySum[item.rarity] = (raritySum[item.rarity] || 0) + v;
+    totalWeight += v;
   }
 
-  const probabilities = {}
-  for (const r in sum) {
-    probabilities[r] = +(sum[r] / total * 100).toFixed(4)
+  const probabilities = {};
+  for(const r in raritySum){
+    probabilities[r] = +(raritySum[r] / totalWeight * 100).toFixed(4);
   }
 
   await supabase
     .from('gacha_sets')
     .update({ probabilities })
-    .eq('id', set_id)
+    .eq('id', setId);
+
+  return probabilities;
 }
 
 app.use((req, res) => {
