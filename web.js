@@ -2,6 +2,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cookieParser from "cookie-parser";
 import dotenv from 'dotenv';
+import crypto from 'crypto'
 dotenv.config();
 import { supabase } from "./db.js";
 import { shardState } from "./index.js";
@@ -11,10 +12,76 @@ import cors from 'cors';
 const app = express();
 app.use(cors()); // CORS回避
 app.use(express.static("public"));
+app.use(express.json());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 const PORT = process.env.PORT || 3000;
+
+/* =====================
+  基本設定
+===================== */
+const {
+  DISCORD_CLIENT_ID,
+  DISCORD_CLIENT_SECRET,
+  DISCORD_REDIRECT_URI
+} = process.env
+
+const DISCORD_REDIRECT_URI = https://bot.sakurahp.f5.si/gachas/auth/callback
+
+// ガチャ管理者（Discord User ID）
+const GACHA_ADMINS = [
+  '123456789012345678',
+  '0',
+  '1'
+]
+
+// in-memory session（本気ならRedisに差し替え）
+const sessions = new Map()
+
+/* =====================
+  レアリティ定義
+===================== */
+const RARITY_WEIGHT = {
+  common: 100,
+  uncommon: 40,
+  rare: 15,
+  epic: 5,
+  legend: 1,
+  superlegend: 0.2
+}
+
+/* =====================
+  util
+===================== */
+function newSession(uid, username) {
+  const sid = crypto.randomUUID()
+  sessions.set(sid, {
+    uid,
+    username,
+    created: Date.now()
+  })
+  return sid
+}
+
+/* =====================
+  middleware
+===================== */
+function requireAuth(req, res, next) {
+  const sid = req.cookies.sid
+  if (!sid || !sessions.has(sid)) {
+    return res.status(401).json({ error: 'unauthorized' })
+  }
+  req.user = sessions.get(sid)
+  next()
+}
+
+function requireAdmin(req, res, next) {
+  if (!GACHA_ADMINS.includes(req.user.uid)) {
+    return res.status(403).json({ error: 'forbidden' })
+  }
+  next()
+}
 
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -593,6 +660,172 @@ app.post("/odai/add", async (req, res) => {
   // 追加後はページリロード
   res.redirect("/odai");
 });
+
+/* =====================
+  OAuth2
+===================== */
+app.get('/gachas/auth/login', (_req, res) => {
+  const url =
+    `https://discord.com/oauth2/authorize` +
+    `?client_id=${DISCORD_CLIENT_ID}` +
+    `&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}` +
+    `&response_type=code&scope=identify`
+  res.redirect(url)
+})
+
+app.get('/gachas/auth/callback', async (req, res) => {
+  const code = req.query.code
+  if (!code) return res.status(400).send('no code')
+
+  const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: DISCORD_CLIENT_ID,
+      client_secret: DISCORD_CLIENT_SECRET,
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: DISCORD_REDIRECT_URI
+    })
+  })
+
+  const token = await tokenRes.json()
+  if (!token.access_token) return res.status(401).send('oauth failed')
+
+  const userRes = await fetch('https://discord.com/api/users/@me', {
+    headers: { Authorization: `Bearer ${token.access_token}` }
+  })
+  const user = await userRes.json()
+
+  if (!GACHA_ADMINS.includes(user.id)) {
+    return res.status(403).send('not admin')
+  }
+
+  const sid = newSession(user.id, user.username)
+
+  res.cookie('sid', sid, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Strict',
+    maxAge: 1000 * 60 * 60 * 6
+  })
+
+  res.redirect('/gachas/dashboard')
+})
+
+app.get('/gachas/auth/logout', requireAuth, (req, res) => {
+  sessions.delete(req.cookies.sid)
+  res.clearCookie('sid')
+  res.json({ ok: true })
+})
+
+app.get('/gachas/auth/me', requireAuth, (req, res) => {
+  res.json(req.user)
+})
+
+/* =====================
+  ガチャセット管理
+===================== */
+
+// 作成
+app.post('/gachas/set/create', requireAuth, requireAdmin, async (req, res) => {
+  const { guild_id, name, channel_id, trigger_word } = req.body
+
+  const { data, error } = await supabase
+    .from('gacha_sets')
+    .insert({
+      guild_id,
+      name,
+      channel_id,
+      trigger_word,
+      enabled: false
+    })
+    .select()
+    .single()
+
+  if (error) return res.status(500).json({ error })
+  res.json(data)
+})
+
+// 有効/無効（複数同時OK）
+app.post('/gachas/set/toggle', requireAuth, requireAdmin, async (req, res) => {
+  const { set_id, enabled } = req.body
+
+  const { error } = await supabase
+    .from('gacha_sets')
+    .update({ enabled })
+    .eq('id', set_id)
+
+  if (error) return res.status(500).json({ error })
+  res.json({ ok: true })
+})
+
+// 一覧
+app.get('/gachas/set/list', requireAuth, requireAdmin, async (req, res) => {
+  const { guild_id } = req.query
+
+  const { data, error } = await supabase
+    .from('gacha_sets')
+    .select('*')
+    .eq('guild_id', guild_id)
+    .order('created_at', { ascending: false })
+
+  if (error) return res.status(500).json({ error })
+  res.json(data)
+})
+
+/* =====================
+  アイテム & 確率自動制御
+===================== */
+
+// セットに一括登録（HTML用）
+app.post('/gachas/set/items', requireAuth, requireAdmin, async (req, res) => {
+  const { set_id, items } = req.body
+
+  await supabase.from('gacha_items').delete().eq('set_id', set_id)
+
+  for (const item of items) {
+    await supabase.from('gacha_items').insert({
+      set_id,
+      display_id: item.display_id,
+      name: item.name,
+      rarity: item.rarity,
+      amount: item.amount
+    })
+  }
+
+  await recalcProbabilitiesBySet(set_id)
+
+  res.json({ ok: true })
+})
+
+// 排出率再計算（完全自動）
+async function recalcProbabilitiesBySet(set_id) {
+  const { data: items } = await supabase
+    .from('gacha_items')
+    .select('rarity, amount')
+    .eq('set_id', set_id)
+
+  let total = 0
+  const sum = {}
+
+  for (const i of items) {
+    const w = RARITY_WEIGHT[i.rarity] ?? 1
+    const v = i.amount * w
+    sum[i.rarity] = (sum[i.rarity] || 0) + v
+    total += v
+  }
+
+  const probabilities = {}
+  for (const r in sum) {
+    probabilities[r] = +(sum[r] / total * 100).toFixed(4)
+  }
+
+  await supabase
+    .from('gacha_sets')
+    .update({ probabilities })
+    .eq('id', set_id)
+}
 
 app.use((req, res) => {
   res.status(404).send(`

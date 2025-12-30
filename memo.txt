@@ -1,57 +1,10 @@
-あああimport express from "express";
-import fetch from "node-fetch";
-import cookieParser from "cookie-parser";
-import { supabase } from "../db/db.js";
+import express from 'express'
+import fetch from 'node-fetch'
+import cookieParser from 'cookie-parser'
+import crypto from 'crypto'
+import { supabase } from './db.js'
 
-const app = express();
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
+const app = express()
+app.use(express.json())
+app.use(cookieParser())
 
-const DISCORD_API = "https://discord.com/api";
-
-// ===== OAuth2 URL =====
-function adminOAuthURL() {
-  return `https://discord.com/oauth2/authorize?` +
-    new URLSearchParams({
-      client_id: process.env.CLIENT_ID,
-      redirect_uri: process.env.ADMIN_REDIRECT_URI,
-      response_type: "code",
-      scope: "identify",
-    });
-}
-
-// ===== Discord user取得 =====
-async function getDiscordUser(code) {
-  const token = await fetch(`${DISCORD_API}/oauth2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.CLIENT_ID,
-      client_secret: process.env.CLIENT_SECRET,
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: process.env.ADMIN_REDIRECT_URI,
-    }),
-  }).then(r => r.json());
-
-  return fetch(`${DISCORD_API}/users/@me`, {
-    headers: { Authorization: `Bearer ${token.access_token}` },
-  }).then(r => r.json());
-}
-
-// ===== 管理者チェック =====
-async function requireAdmin(req, res, next) {
-  const adminId = req.cookies.admin;
-  if (!adminId) return res.redirect(adminOAuthURL());
-
-  const { data } = await supabase
-    .from("admins")
-    .select("discord_id")
-    .eq("discord_id", adminId)
-    .single();
-
-  if (!data) return res.sendStatus(401);
-  next();
-}
-
-export default app;
