@@ -199,7 +199,7 @@ document.getElementById('create-set-btn').addEventListener('click', async ()=>{
     const res = await fetch('/gachas/auth/me');
     if (res.status === 401) {
       // 認証まだなら再読み込みしてクッキーを反映させる
-      window.location.reload();
+      window.location.reload(true);
     }
   }
 
