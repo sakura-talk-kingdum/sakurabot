@@ -710,7 +710,7 @@ app.get('/gachas/auth/callback', async (req, res) => {
   res.cookie('sid', sid, {
     httpOnly: true,
     secure: true,
-    sameSite: 'Strict',
+    sameSite: 'Lax',
     maxAge: 1000 * 60 * 60 * 6 // 6時間
   })
 
