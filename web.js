@@ -2,7 +2,8 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import cookieParser from "cookie-parser";
 import dotenv from 'dotenv';
-import crypto from 'crypto'
+import crypto from 'crypto';
+import path from'path';
 dotenv.config();
 import { supabase } from "./db.js";
 import { shardState } from "./index.js";
