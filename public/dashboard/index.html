@@ -43,11 +43,10 @@ async function getUser() {
   return res.json();
 }
 
-// --- ガチャセット一覧取得 ---
+// fetchSets 関数
 async function fetchSets() {
-  const user = await getUser();
-  if(!user) return;
-  const res = await fetch(`${API_PREFIX}/set/list?guild_id=${user.uid}`);
+  const res = await fetch(`${API_PREFIX}/sets`);
+  if (!res.ok) return alert('セット取得失敗');
   const data = await res.json();
   renderSets(data);
 }
