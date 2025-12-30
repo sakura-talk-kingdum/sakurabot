@@ -30,9 +30,10 @@ const DISCORD_REDIRECT_URI = 'https://bot.sakurahp.f5.si/gachas/auth/callback';
 
 // ガチャ管理者（Discord User ID）
 const GACHA_ADMINS = [
-  '123456789012345678',
-  '0',
-  '1'
+  '1208358513580052500',
+  '1099098129338466385',
+  '780319649857929237',
+  '1343054861243256897'
 ]
 
 // in-memory session（本気ならRedisに差し替え）
