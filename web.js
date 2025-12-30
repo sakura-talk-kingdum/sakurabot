@@ -115,7 +115,7 @@ async function getDiscordUser(code) {
 }
 
 // ===== 管理者チェック =====
-async function requireAdmin(req, res, next) {
+async function requireAdminuser(req, res, next) {
   const adminId = req.cookies.admin;
   if (!adminId) return res.redirect(adminOAuthURL());
 
@@ -273,7 +273,7 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ===== 管理画面 =====
-app.get("/admins", requireAdmin, async (req, res) => {
+app.get("/admins", requireAdminuser, async (req, res) => {
   const { data } = await supabase
     .from("warned_users")
     .select("*")
@@ -359,7 +359,7 @@ app.get("/admins/callback", async (req, res) => {
 });
 
 // ===== 追加処理 =====
-app.post("/admins/add", requireAdmin, async (req, res) => {
+app.post("/admins/add", requireAdminuser, async (req, res) => {
   const { targetId, reason } = req.body;
 
   await supabase.from("warned_users").upsert({
