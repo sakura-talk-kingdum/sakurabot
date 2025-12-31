@@ -756,17 +756,19 @@ app.post('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(data)
 })
 
-app.put('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) => {
-  const { setId } = req.params
+app.put('/gachas/sets/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, channel_id, trigger_word } = req.body;
 
   const { error } = await supabase
     .from('gacha_sets')
-    .update(req.body)
-    .eq('id', setId)
+    .update({ name, channel_id, trigger_word })
+    .eq('id', id);
 
-  if (error) return res.status(500).json(error)
-  res.json({ ok: true })
-})
+  if (error) return res.status(500).json(error);
+  res.json({ ok: true });
+});
+
 
 app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) => {
   const { setId } = req.params
@@ -795,15 +797,22 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res)
 
 app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res) => {
   const { setId } = req.params
-  const { display_id, name, rarity, amount } = req.body
 
-  const { error } = await supabase.from('gacha_items').insert({
+  // 配列で受け取る前提
+  const items = Array.isArray(req.body) ? req.body : [req.body]
+
+  const insertData = items.map(item => ({
     set_id: setId,
-    display_id,
-    name,
-    rarity,
-    amount
-  })
+    display_id: item.display_id,
+    name: item.name,
+    rarity: item.rarity,
+    amount: item.amount,
+    description: item.description ?? null
+  }))
+
+  const { error } = await supabase
+    .from('gacha_items')
+    .insert(insertData)
 
   if (error) return res.status(500).json(error)
 
