@@ -205,9 +205,9 @@ async function deleteItem(itemId, setId) {
   セット作成
 ===================== */
 document.getElementById('create-set').onclick = async () => {
-  const name = new-name.value;
-  const channel_id = new-channel.value;
-  const trigger_word = new-trigger.value;
+const name = document.getElementById('new-name').value;
+const channel_id = document.getElementById('new-channel').value;
+const trigger_word = document.getElementById('new-trigger').value;
 
   if (!name || !channel_id || !trigger_word) return;
 
