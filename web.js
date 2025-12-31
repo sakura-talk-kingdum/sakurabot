@@ -11,10 +11,7 @@ import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
 
 const app = express();
-app.use(cors()); // CORS回避
-app.use(express.static("public"));
 app.use(express.json());
-app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 const PORT = process.env.PORT || 3000;
@@ -133,7 +130,7 @@ async function requireAdminuser(req, res, next) {
 }
 
 // 認証ページ
-app.get('/auth/', (req, res) => {
+app.get('/auth/', cors(), (req, res) => {
   res.send(`
   <!DOCTYPE html>
 <html lang="ja">
@@ -201,7 +198,7 @@ app.get('/auth/', (req, res) => {
 });
 
 // ルート: bot稼働中 + iframeでGASステータス読み込み
-app.get('/', (req, res) => {
+app.get('/', cors(), (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html lang="ja">
@@ -263,7 +260,7 @@ app.get('/', (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', async (req, res) => {
+app.get('/auth/callback', cors(), async (req, res) => {
   const code = req.query.code;
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   try {
@@ -276,7 +273,7 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // ===== 管理画面 =====
-app.get("/admins", requireAdminuser, async (req, res) => {
+app.get("/admins", requireAdminuser, cors(), async (req, res) => {
   const { data } = await supabase
     .from("warned_users")
     .select("*")
@@ -337,7 +334,7 @@ ${rows || "<tr><td colspan='3'>まだ登録なし</td></tr>"}
 });
 
 // ===== callback =====
-app.get("/admins/callback", async (req, res) => {
+app.get("/admins/callback", cors(), async (req, res) => {
   const code = req.query.code;
   if (!code) return res.sendStatus(401);
 
@@ -362,7 +359,7 @@ app.get("/admins/callback", async (req, res) => {
 });
 
 // ===== 追加処理 =====
-app.post("/admins/add", requireAdminuser, async (req, res) => {
+app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { targetId, reason } = req.body;
 
   await supabase.from("warned_users").upsert({
@@ -381,7 +378,7 @@ const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const nowJST = () =>
   new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
 
-app.get("/api", async (req, res) => {
+app.get("/api", cors(), async (req, res) => {
   try {
     // --- Discord REST (ギルド情報) ---
     const guildRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD_ID}?with_counts=true`, {
@@ -448,7 +445,7 @@ app.get("/api", async (req, res) => {
   }
 });
 
-app.get("/api/events", async (req, res) => {
+app.get("/api/events", cors(), async (req, res) => {
   try {
     const eventsRes = await fetch(
       `https://discord.com/api/v10/guilds/${GUILD_ID}/scheduled-events?with_user_count=true`,
@@ -494,7 +491,7 @@ app.get("/api/events", async (req, res) => {
 });
 
 //API側からバージョンを確認するため
-app.get("/version", async (req, res) => {
+app.get("/version", cors(), async (req, res) => {
   try{
     res.json({
              status: 200,
@@ -510,7 +507,7 @@ app.get("/version", async (req, res) => {
   }
 });
 
-app.get("/api/invites/:code", async (req, res) => {
+app.get("/api/invites/:code", cors(), async (req, res) => {
   const inviteCode = req.params.code
     .replace(".gg", "")
     .replace("discord.gg/", "")
@@ -574,7 +571,7 @@ app.get("/api/invites/:code", async (req, res) => {
   }
 });
 
-app.get("/shards/status", (_, res) => {
+app.get("/shards/status", cors(), (_, res) => {
   if (!shardState.shards.length) {
     return res.status(503).json({
       ok: false,
@@ -591,7 +588,7 @@ const localDateString = date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
 });
 
 // 📌 /odai → HTML直書き + お題追加フォーム
-app.get("/odai", (req, res) => {
+app.get("/odai", cors(), (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`
 <!DOCTYPE html>
@@ -637,7 +634,7 @@ app.get("/odai", (req, res) => {
 });
 
 // 📌 お題一覧 API
-app.get("/odai/list", async (req, res) => {
+app.get("/odai/list", cors(), async (req, res) => {
   const { data, error } = await supabase
     .from("odai")
     .select("*")
@@ -647,7 +644,7 @@ app.get("/odai/list", async (req, res) => {
 });
 
 // 📌 お題追加 API（フォーム・JSON両方対応）
-app.post("/odai/add", async (req, res) => {
+app.post("/odai/add", cors(), async (req, res) => {
   let topic = req.body.topic || (req.body.topic && req.body.topic.trim());
   if (!topic || topic.trim() === "") {
     return res.send("空のトピックは追加できません");
@@ -663,7 +660,7 @@ app.post("/odai/add", async (req, res) => {
   res.redirect("/odai");
 });
 
-app.get('/gachas/login', (req, res) => {
+app.get('/gachas/login', cors(),  (req, res) => {
   const url =
     `https://discord.com/oauth2/authorize` +
     `?client_id=${DISCORD_CLIENT_ID}` +
@@ -674,7 +671,7 @@ app.get('/gachas/login', (req, res) => {
   res.redirect(url)
 })
 
-app.get('/gachas/auth/callback', async (req, res) => {
+app.get('/gachas/auth/callback', cors(), async (req, res) => {
   const { code } = req.query
   if (!code) return res.status(400).send('no code')
 
@@ -718,17 +715,17 @@ app.get('/gachas/auth/callback', async (req, res) => {
   res.redirect('/gachas/dashboard')
 })
 
-app.post('/gachas/logout', requireAuth, (req, res) => {
+app.post('/gachas/logout', requireAuth, cors(), (req, res) => {
   sessions.delete(req.cookies.sid)
   res.clearCookie('sid')
   res.json({ ok: true })
 })
 
-app.get('/gachas/me', requireAuth, (req, res) => {
+app.get('/gachas/me', requireAuth, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), (req, res) => {
   res.json(req.user)
 })
 
-app.get('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
+app.get('/gachas/sets', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { data, error } = await supabase
     .from('gacha_sets')
     .select('*')
@@ -738,7 +735,7 @@ app.get('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
   res.json(data)
 })
 
-app.post('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
+app.post('/gachas/sets', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { guild_id, name, channel_id, trigger_word } = req.body
 
   const { data, error } = await supabase
@@ -757,7 +754,7 @@ app.post('/gachas/sets', requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json(data)
 })
 
-app.put('/gachas/sets/:id', requireAuth, requireAdmin, async (req, res) => {
+app.put('/gachas/sets/:id', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { id } = req.params;
   const { name, channel_id, trigger_word } = req.body;
 
@@ -771,7 +768,7 @@ app.put('/gachas/sets/:id', requireAuth, requireAdmin, async (req, res) => {
 });
 
 
-app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId } = req.params
 
   const { error } = await supabase
@@ -783,7 +780,7 @@ app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, async (req, res) =>
   res.json({ ok: true })
 })
 
-app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res) => {
+app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId } = req.params
 
   const { data, error } = await supabase
@@ -796,7 +793,7 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res)
   res.json(data)
 })
 
-app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res) => {
+app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId } = req.params
 
   // 配列で受け取る前提
@@ -821,7 +818,7 @@ app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, async (req, res
   res.status(201).json({ ok: true })
 })
 
-app.put('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async (req, res) => {
+app.put('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId, itemId } = req.params
 
   const { error } = await supabase
@@ -836,7 +833,7 @@ app.put('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async (r
   res.json({ ok: true })
 })
 
-app.delete('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async (req, res) => {
+app.delete('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId, itemId } = req.params
 
   const { error } = await supabase
@@ -851,7 +848,7 @@ app.delete('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, async
   res.json({ ok: true })
 })
 
-app.use('/gachas/dashboard', requireAuth, requireAdmin, express.static(path.join(process.cwd(), 'public', 'dashboard')));
+app.use('/gachas/dashboard', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), express.static(path.join(process.cwd(), 'public', 'dashboard')));
 
 async function recalcProbabilitiesBySet(setId){
   const { data: items, error } = await supabase
@@ -884,7 +881,7 @@ async function recalcProbabilitiesBySet(setId){
   return probabilities;
 }
 
-app.use((req, res) => {
+app.use(cors() (req, res) => {
   res.status(404).send(`
     <!DOCTYPE html>
     <html lang="ja">
@@ -925,4 +922,5 @@ app.use((req, res) => {
   `);
 });
 
+app.use(express.static("public"));
 app.listen(PORT, () => console.log(`Web server running on port ${PORT}`));
