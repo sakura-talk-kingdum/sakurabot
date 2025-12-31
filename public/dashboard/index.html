@@ -3,16 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ガチャダッシュボード</title>
+<title>🎰 ガチャダッシュボード</title>
 <style>
-body { font-family: system-ui; background:#f0f2f5; margin:0 }
-header { background:#5865F2; color:#fff; padding:15px; font-size:1.4rem }
-main { padding:20px }
-.set { background:#fff; border-radius:8px; padding:15px; margin-bottom:20px }
-.items { margin-top:10px; padding-left:10px }
-.item { background:#fafafa; padding:6px; border-radius:6px; margin:5px 0 }
-input,select,button { padding:6px; margin:2px }
-small { color:#666 }
+body{font-family:system-ui;background:#f0f2f5;margin:0}
+header{background:#5865F2;color:#fff;padding:14px;font-size:1.3rem}
+main{padding:20px}
+.set{background:#fff;border-radius:8px;padding:15px;margin-bottom:20px}
+.items{margin-top:10px;padding-left:10px}
+.item{background:#fafafa;padding:6px;border-radius:6px;margin:6px 0}
+input,select,button{padding:6px;margin:2px}
+button{cursor:pointer}
+small{color:#666}
 </style>
 </head>
 
@@ -27,22 +28,23 @@ small { color:#666 }
 <button onclick="createSet()">作成</button>
 
 <hr>
-
 <div id="sets"></div>
 
 </main>
 
 <script>
 const API = '/gachas'
+const $ = id => document.getElementById(id)
 
 /* ========= SET ========= */
 
 async function loadSets(){
-  const sets = await fetch(`${API}/sets`).then(r=>r.json())
-  const el = document.getElementById('sets')
-  el.innerHTML = ''
+  const res = await fetch(`${API}/sets`,{credentials:'include'})
+  const sets = await res.json()
+
+  $('sets').innerHTML = ''
   for(const s of sets){
-    el.innerHTML += renderSet(s)
+    $('sets').insertAdjacentHTML('beforeend', renderSet(s))
     loadItems(s.id)
   }
 }
@@ -53,21 +55,22 @@ function renderSet(s){
     <b>${s.name}</b>
     <small>(${s.channel_id} / ${s.trigger_word})</small><br>
 
-    有効 <input type="checkbox" ${s.enabled?'checked':''}
-      onchange="toggleSet('${s.id}',this.checked)">
-
     <button onclick="editSet('${s.id}')">編集</button>
     <button onclick="deleteSet('${s.id}')">削除</button>
 
     <div class="items" id="items-${s.id}"></div>
 
     <div>
-      <input placeholder="アイテム名" id="iname-${s.id}">
-      <input placeholder="説明" id="idesc-${s.id}">
-      <input type="number" placeholder="個数" id="iamount-${s.id}">
+      <input id="iname-${s.id}" placeholder="アイテム名">
+      <input id="idesc-${s.id}" placeholder="説明">
+      <input id="iamount-${s.id}" type="number" placeholder="個数">
       <select id="irarity-${s.id}">
-        <option>common</option><option>uncommon</option><option>rare</option>
-        <option>epic</option><option>legend</option><option>superlegend</option>
+        <option value="common">common</option>
+        <option value="uncommon">uncommon</option>
+        <option value="rare">rare</option>
+        <option value="epic">epic</option>
+        <option value="legend">legend</option>
+        <option value="superlegend">superlegend</option>
       </select>
       <button onclick="addItem('${s.id}')">追加</button>
     </div>
@@ -75,99 +78,137 @@ function renderSet(s){
 }
 
 async function createSet(){
+  const name = $('new-name').value.trim()
+  const channel_id = $('new-channel').value.trim()
+  const trigger_word = $('new-trigger').value.trim()
+
+  if(!name || !channel_id || !trigger_word){
+    return alert('全部必須')
+  }
+
   await fetch(`${API}/sets`,{
     method:'POST',
-    credentials: 'include', 
+    credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      guild_id:'guild',
-      name:newName.value,
-      channel_id:newChannel.value,
-      trigger_word:newTrigger.value
-    })
+    body:JSON.stringify({ guild_id:'guild', name, channel_id, trigger_word })
   })
+
+  $('new-name').value=''
+  $('new-channel').value=''
+  $('new-trigger').value=''
   loadSets()
 }
 
 async function editSet(id){
   const name = prompt('セット名')
+  if(!name) return
+
   const channel_id = prompt('チャンネルID')
   const trigger_word = prompt('トリガー')
-  if(!name) return
+
   await fetch(`${API}/sets/${id}`,{
     method:'PUT',
-    credentials: 'include', 
+    credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,channel_id,trigger_word})
+    body:JSON.stringify({ name, channel_id, trigger_word })
   })
   loadSets()
 }
 
 async function deleteSet(id){
   if(!confirm('削除する？')) return
-  await fetch(`${API}/sets/${id}`,{method:'DELETE',credentials: 'include'})
+  await fetch(`${API}/sets/${id}`,{method:'DELETE',credentials:'include'})
   loadSets()
-}
-
-async function toggleSet(id,enabled){
-  await fetch(`${API}/set/toggle`,{
-    method:'POST',
-    credentials: 'include', 
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({set_id:id,enabled})
-  })
 }
 
 /* ========= ITEM ========= */
 
 async function loadItems(setId){
-  const items = await fetch(`${API}/sets/${setId}/items`).then(r=>r.json())
-  const el = document.getElementById(`items-${setId}`)
+  const res = await fetch(`${API}/sets/${setId}/items`,{credentials:'include'})
+  const items = await res.json()
+
+  const el = $(`items-${setId}`)
   el.innerHTML = '<b>アイテム</b>'
+
   for(const i of items){
-    el.innerHTML += `
-    <div class="item">
-      ${i.name} (${i.amount}) [${i.rarity}]<br>
-      <small>${i.description||''}</small><br>
-      <button onclick="editItem('${setId}','${i.id}')">編集</button>
-      <button onclick="deleteItem('${setId}','${i.id}')">削除</button>
-    </div>`
+    el.insertAdjacentHTML('beforeend', `
+      <div class="item">
+        <b>${i.name}</b> (${i.amount}) [${i.rarity}]<br>
+        <small>${i.description ?? ''}</small><br>
+        <button onclick="editItem('${setId}','${i.id}')">編集</button>
+        <button onclick="deleteItem('${setId}','${i.id}')">削除</button>
+      </div>
+    `)
   }
 }
 
 async function addItem(setId){
+  const name = $(`iname-${setId}`).value.trim()
+  const description = $(`idesc-${setId}`).value || null
+  const amount = Number($(`iamount-${setId}`).value)
+  const rarity = $(`irarity-${setId}`).value
+
+  if(!name) return alert('名前必須')
+  if(!Number.isInteger(amount) || amount <= 0) return alert('個数不正')
+
   await fetch(`${API}/sets/${setId}/items`,{
     method:'POST',
-    credentials: 'include', 
+    credentials:'include',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
-      display_id:Date.now(),
-      name:document.getElementById(`iname-${setId}`).value,
-      description:document.getElementById(`idesc-${setId}`).value,
-      amount:+document.getElementById(`iamount-${setId}`).value,
-      rarity:document.getElementById(`irarity-${setId}`).value
+      display_id: Math.floor(Math.random()*1000000),
+      name,
+      description,
+      amount,
+      rarity
     })
   })
+
+  $(`iname-${setId}`).value=''
+  $(`idesc-${setId}`).value=''
+  $(`iamount-${setId}`).value=''
   loadItems(setId)
 }
 
 async function editItem(setId,itemId){
   const name = prompt('名前')
-  const description = prompt('説明')
-  const amount = +prompt('個数')
+  if(!name) return alert('名前必須')
+
+  const amount = Number(prompt('個数'))
+  if(!Number.isInteger(amount) || amount<=0) return alert('個数不正')
+
   const rarity = prompt('レアリティ')
-  await fetch(`${API}/sets/${setId}/items/${itemId}`,{
+  if(!rarity) return
+
+  const description = prompt('説明') ?? null
+
+  const res = await fetch(`${API}/sets/${setId}/items/${itemId}`,{
     method:'PUT',
-    credentials: 'include', 
+    credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,description,amount,rarity})
+    body:JSON.stringify({ name, description, amount, rarity })
   })
+
+  if(!res.ok){
+    const e = await res.json()
+    alert(e.message)
+    return
+  }
+
   loadItems(setId)
 }
 
 async function deleteItem(setId,itemId){
   if(!confirm('削除？')) return
-  await fetch(`${API}/sets/${setId}/items/${itemId}`,{method:'DELETE',credentials: 'include'})
+  const res = await fetch(`${API}/sets/${setId}/items/${itemId}`,{
+    method:'DELETE',
+    credentials:'include'
+  })
+  if(!res.ok){
+    const e = await res.json()
+    alert(e.message)
+    return
+  }
   loadItems(setId)
 }
 
