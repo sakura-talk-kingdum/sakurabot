@@ -77,6 +77,7 @@ function renderSet(s){
 async function createSet(){
   await fetch(`${API}/sets`,{
     method:'POST',
+    credentials: 'include', 
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       guild_id:'guild',
@@ -95,6 +96,7 @@ async function editSet(id){
   if(!name) return
   await fetch(`${API}/sets/${id}`,{
     method:'PUT',
+    credentials: 'include', 
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name,channel_id,trigger_word})
   })
@@ -103,13 +105,14 @@ async function editSet(id){
 
 async function deleteSet(id){
   if(!confirm('削除する？')) return
-  await fetch(`${API}/sets/${id}`,{method:'DELETE'})
+  await fetch(`${API}/sets/${id}`,{method:'DELETE',credentials: 'include'})
   loadSets()
 }
 
 async function toggleSet(id,enabled){
   await fetch(`${API}/set/toggle`,{
     method:'POST',
+    credentials: 'include', 
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({set_id:id,enabled})
   })
@@ -135,6 +138,7 @@ async function loadItems(setId){
 async function addItem(setId){
   await fetch(`${API}/sets/${setId}/items`,{
     method:'POST',
+    credentials: 'include', 
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       display_id:Date.now(),
@@ -154,6 +158,7 @@ async function editItem(setId,itemId){
   const rarity = prompt('レアリティ')
   await fetch(`${API}/sets/${setId}/items/${itemId}`,{
     method:'PUT',
+    credentials: 'include', 
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({name,description,amount,rarity})
   })
@@ -162,7 +167,7 @@ async function editItem(setId,itemId){
 
 async function deleteItem(setId,itemId){
   if(!confirm('削除？')) return
-  await fetch(`${API}/sets/${setId}/items/${itemId}`,{method:'DELETE'})
+  await fetch(`${API}/sets/${setId}/items/${itemId}`,{method:'DELETE',credentials: 'include'})
   loadItems(setId)
 }
 
