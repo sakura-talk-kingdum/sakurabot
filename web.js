@@ -881,7 +881,7 @@ async function recalcProbabilitiesBySet(setId){
   return probabilities;
 }
 
-app.use(cors() (req, res) => {
+app.use((req,res) => {
   res.status(404).send(`
     <!DOCTYPE html>
     <html lang="ja">
