@@ -328,10 +328,11 @@ client.on('interactionCreate', async interaction => {
     const adminPermissionLevelRequired = 8;
     const userPermissionLevel = interaction.member?.permissions?.bitfield ?? 0;
   if (!interaction.isChatInputCommand()) return;
-  console.log("🔥 command:", interaction.commandName, "sub:", interaction.options.getSubcommand(false));
+  console.log("🔥 command:", commandName, "sub:", interaction.options.getSubcommand(false));
   const { commandName } = interaction;
+  const {sub} = interaction.options.getSubcommand;
 
-  if (interaction.commandName === 'ping') {
+  if (commandName === 'ping') {
 
   try {
     await interaction.deferReply() 
@@ -393,7 +394,7 @@ client.on('interactionCreate', async interaction => {
   }
 }
   }     
-  if (interaction.commandName === "poll") {
+  if (commandName === "poll") {
 
   const title = interaction.options.getString("title");
   const rawData = interaction.options.getString("data");
@@ -665,7 +666,7 @@ client.on('interactionCreate', async interaction => {
   // -----------------------
   // /account info
   // -----------------------
-  if (interaction.commandName === "account" && interaction.options.getSubcommand() === "info") {
+  if (commandName === "account" && interaction.options.getSubcommand() === "info") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const target = interaction.options.getUser("user") || interaction.user;
@@ -701,7 +702,7 @@ client.on('interactionCreate', async interaction => {
   // -----------------------
   // /account settings
   // -----------------------
-  if (interaction.commandName === "account" && interaction.options.getSubcommand() === "settings") {
+  if (commandName === "account" && interaction.options.getSubcommand() === "settings") {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const set = interaction.options.getString("set");
     const type = interaction.options.getString("type");
@@ -719,10 +720,10 @@ client.on('interactionCreate', async interaction => {
   // /admin account 系
   //==================================================
  try{
-  if (interaction.commandName === "admin") {
+  if (commandName === "admin") {
 
     // アカウント作成
-    if (interaction.options.getSubcommand() === "account-create") {
+    if (sub === "account-create") {
       await interaction.deferReply({ ephemeral: false });
       const user = interaction.options.getUser("user");
       const res = await createAccount(user.id);
@@ -734,7 +735,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // アカウント削除
-    if (interaction.options.getSubcommand() === "account-delete") {
+    if (sub === "account-delete") {
       await interaction.deferReply({ ephemeral: false });
       const user = interaction.options.getUser("user");
       await deleteAccount(user.id);
@@ -742,7 +743,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // アカウント移行
-    if (interaction.options.getSubcommand() === "account-transfer") {
+    if (sub === "account-transfer") {
       await interaction.deferReply({ ephemeral: false });
 
       const oldUser = interaction.options.getUser("old");
@@ -757,7 +758,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // XP操作
-    if (interaction.options.getSubcommand() === "account-xp") {
+    if (sub === "account-xp") {
       await interaction.deferReply({ ephemeral: false });
       const user = interaction.options.getUser("user");
       const type = interaction.options.getString("type");
@@ -768,7 +769,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // Level操作
-    if (interaction.options.getSubcommand() === "account-level") {
+    if (sub === "account-level") {
       await interaction.deferReply({ ephemeral: false });
       const user = interaction.options.getUser("user");
       const type = interaction.options.getString("type");
@@ -783,9 +784,8 @@ client.on('interactionCreate', async interaction => {
  }
 try{
     // /record 系かチェック
-    if (interaction.commandName === "record") {
+    if (commandName === "record") {
       // ここでサブコマンドを呼ぶのはOK（record はサブコマンド定義済み）
-      const sub = interaction.options.getSubcommand() // "start" or "stop"
 
       if (sub === "start") {
         // 実処理は record.js に丸投げ
@@ -823,7 +823,7 @@ try{
     }
     // 追加: ここで errorReporter に投げても良い
   }
-if (interaction.commandName === "createaccount") {
+if (commandName === "createaccount") {
     if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({
             content: "🚫 このコマンドは管理者専用だよ〜！",
@@ -857,7 +857,7 @@ if (interaction.commandName === "createaccount") {
     // -----------------------------------
     // deleteaccount
     // -----------------------------------
-    if (interaction.commandName === "deleteaccount") {
+    if (commandName === "deleteaccount") {
         if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ content: "🚫 管理者じゃないとダメだよ！", flags: MessageFlags.Ephemeral });
         }
@@ -880,7 +880,7 @@ if (interaction.commandName === "createaccount") {
     // -----------------------------------
     // transferaccount
     // -----------------------------------
-    if (interaction.commandName === "transferaccount") {
+    if (commandName === "transferaccount") {
         if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ content: "🚫 権限足りないよ！", flags: MessageFlags.Ephemeral });
         }
@@ -905,7 +905,7 @@ if (interaction.commandName === "createaccount") {
     // -----------------------------------
     // myxp
     // -----------------------------------
-if (interaction.commandName === "myxp") {
+if (commandName === "myxp") {
     try {
         await interaction.deferReply();
 
@@ -931,6 +931,96 @@ if (interaction.commandName === "myxp") {
         await interaction.followUp({ content: "⚠ エラーが起きたよ…", flags: MessageFlags.Ephemeral });
     }
 }
+  if (commandName === 'gachas') {
+     ()
+
+    /* =====================
+       /gachas inventory
+    ===================== */
+    if (sub === 'inventory') {
+      await interaction.deferReply({ ephemeral: true })
+
+      const targetUser = interaction.options.getUser('user')
+      const gachaName = interaction.options.getString('gachas')
+
+      const { data: sets } = await supabase
+        .from('gacha_sets')
+        .select('id,name')
+        .eq('guild_id', interaction.guild.id)
+        .ilike('name', `%${gachaName}%`)
+
+      if (!sets || sets.length === 0) {
+        await interaction.editReply('❌ ガチャが見つからない')
+      } else {
+        const setIds = sets.map(s => s.id)
+
+        const { data: logs } = await supabase
+          .from('gacha_logs')
+          .select('item_name, rarity')
+          .eq('user_id', targetUser.id)
+          .in('set_id', setIds)
+
+        if (!logs || logs.length === 0) {
+          await interaction.editReply('📦 まだ引いてない')
+        } else {
+          const uniq = new Map()
+          for (const l of logs) {
+            if (uniq.has(l.item_name) === false) {
+              uniq.set(l.item_name, l)
+            }
+          }
+
+          const embed = new EmbedBuilder()
+            .setTitle(`🎒 ${targetUser.username} のインベントリ`)
+            .setDescription(`🎰 ${sets.map(s => s.name).join(', ')}`)
+            .setColor(0x5865F2)
+            .setFooter({ text: `被り除外 ${uniq.size} 種類` })
+
+          for (const v of [...uniq.values()].slice(0, 25)) {
+            embed.addFields({
+              name: v.item_name,
+              value: `⭐ ${v.rarity}`,
+              inline: true
+            })
+          }
+
+          await interaction.editReply({ embeds: [embed] })
+        }
+      }
+    }
+
+    /* =====================
+       /gachas search（例）
+    ===================== */
+    if (sub === 'search') {
+      await interaction.deferReply({ ephemeral: true })
+
+      const name = interaction.options.getString('name')
+
+      const { data } = await supabase
+        .from('gacha_sets')
+        .select('name, trigger_word')
+        .ilike('name', `%${name}%`)
+
+      if (!data || data.length === 0) {
+        await interaction.editReply('🔍 見つからない')
+      } else {
+        const embed = new EmbedBuilder()
+          .setTitle('🎰 ガチャ検索結果')
+          .setColor(0x2ecc71)
+
+        for (const g of data) {
+          embed.addFields({
+            name: g.name,
+            value: `trigger: ${g.trigger_word}`
+          })
+        }
+
+        await interaction.editReply({ embeds: [embed] })
+      }
+    }
+  }
+
 });         
 
       
