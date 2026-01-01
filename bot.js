@@ -1351,7 +1351,7 @@ if (client.shard && client.shard.ids[0] !== 0) return;
   const { data: sets } = await supabase
     .from('gacha_sets')
     .select('*')
-    .eq('guild_id', guild-id)
+    .eq('guild_id', "guild")
     .eq('enabled', true)
 
   if (!sets || sets.length === 0) {
