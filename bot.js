@@ -1296,7 +1296,7 @@ if (!sent) return;
   console.log('guild', message.guild.id)
   console.log('channel', message.channel.id)
   console.log('content', message.content)
-  console.log('sets', sets)
+  console.log('set', set.name)
   
   const { data: items } = await supabase
     .from('gacha_items')
@@ -1377,7 +1377,7 @@ if (client.shard && client.shard.ids[0] !== 0) return;
     }
   }
   // ===== AIチャンネル =====
-  if (message.channel.Id === AI_CHANNEL_ID) {
+  if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI();
   }
 
