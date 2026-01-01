@@ -1344,38 +1344,45 @@ if (!sent) return;
 client.on("messageCreate", async message => {
   if (message.author.bot) return;
   if (message.guild === null) return;
+  console.log('MC OK');
   // shard 0 以外はDB触らない
 // shardが定義されていて、0以外なら弾く
 if (client.shard && client.shard.ids[0] !== 0) return;
+console.log('shard OK');
    /* ガチャ設定取得 */
   const { data: sets } = await supabase
     .from('gacha_sets')
     .select('*')
     .eq('guild_id', "guild")
     .eq('enabled', true)
-
+  console.log('sql ok');
   if (!sets || sets.length === 0) {
     return
+    console.log('no gachas');
   }
 
   /* 該当ガチャだけ処理 */
   for (const set of sets) {
-
+  console.log('gachas enabled');
     /* チャンネル一致 */
     if (message.channel.id !== set.channel_id) {
       continue
+      console.log('channel mismatch');
     }
 
     /* トリガー一致（完全一致） */
     if (message.content.trim() === set.trigger_word) {
+      console.log('Gacha triggered:', set.name)
 
       /* ===== ガチャ処理 ===== */
       await runGacha(message, set)
 
       /* 同じメッセージで複数ガチャは引かせない */
       break
+      console.log('break');
     }
   }
+  console.log('else');
   // ===== AIチャンネル =====
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI();
