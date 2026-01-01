@@ -1293,14 +1293,88 @@ if (!sent) return;
     console.error('固定メッセージ更新エラー:', err);
   }
  }
+
+ async function runGacha(message, set) {
+  const { data: items } = await supabase
+    .from('gacha_items')
+    .select('*')
+    .eq('set_id', set.id)
+
+  if (!items || items.length === 0) {
+    return
+  }
+
+  /* 重み抽選 */
+  let pool = []
+  for (const i of items) {
+    const w = RARITY_WEIGHT[i.rarity] || 1
+    for (let n = 0; n < i.amount * w; n++) {
+      pool.push(i)
+    }
+  }
+
+  const hit = pool[Math.floor(Math.random() * pool.length)]
+
+  /* ログ保存 */
+  await supabase.from('gacha_logs').insert({
+    user_id: message.author.id,
+    guild_id: message.guild.id,
+    set_id: set.id,
+    item_id: hit.id,
+    item_name: hit.name,
+    rarity: hit.rarity
+  })
+
+  /* Embed */
+  const embed = new EmbedBuilder()
+    .setTitle(`🎰 ${set.name}`)
+    .setDescription(`**${hit.name}**`)
+    .addFields(
+      { name: 'レアリティ', value: hit.rarity, inline: true }
+    )
+    .setFooter({ text: `ID: ${hit.id}` })
+    .setColor(0xF1C40F)
+
+  await message.reply({ embeds: [embed] })
+}
+
 client.on("messageCreate", async message => {
   console.log("messageCreate fired");
   if (message.author.bot) return;
-
+  if (message.guild === null) return;
   // shard 0 以外はDB触らない
 // shardが定義されていて、0以外なら弾く
 if (client.shard && client.shard.ids[0] !== 0) return;
   console.log("shard passed");
+   /* ガチャ設定取得 */
+  const { data: sets } = await supabase
+    .from('gacha_sets')
+    .select('*')
+    .eq('guild_id', message.guild.id)
+    .eq('enabled', true)
+
+  if (!sets || sets.length === 0) {
+    return
+  }
+
+  /* 該当ガチャだけ処理 */
+  for (const set of sets) {
+
+    /* チャンネル一致 */
+    if (message.channel.id !== set.channel_id) {
+      continue
+    }
+
+    /* トリガー一致（完全一致） */
+    if (message.content.trim() === set.trigger_word) {
+
+      /* ===== ガチャ処理 ===== */
+      await runGacha(message, set)
+
+      /* 同じメッセージで複数ガチャは引かせない */
+      break
+    }
+  }
   // ===== AIチャンネル =====
   if (message.channel.Id === AI_CHANNEL_ID) {
     return handleAI();
