@@ -1293,6 +1293,11 @@ if (!sent) return;
  }
 
  async function runGacha(message, set) {
+  console.log('guild', message.guild.id)
+  console.log('channel', message.channel.id)
+  console.log('content', message.content)
+  console.log('sets', sets)
+  
   const { data: items } = await supabase
     .from('gacha_items')
     .select('*')
@@ -1337,18 +1342,16 @@ if (!sent) return;
 }
 
 client.on("messageCreate", async message => {
-  console.log("messageCreate fired");
   if (message.author.bot) return;
   if (message.guild === null) return;
   // shard 0 以外はDB触らない
 // shardが定義されていて、0以外なら弾く
 if (client.shard && client.shard.ids[0] !== 0) return;
-  console.log("shard passed");
    /* ガチャ設定取得 */
   const { data: sets } = await supabase
     .from('gacha_sets')
     .select('*')
-    .eq('guild_id', message.guild.id)
+    .eq('guild_id', guild-id)
     .eq('enabled', true)
 
   if (!sets || sets.length === 0) {
