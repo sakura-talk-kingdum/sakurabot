@@ -932,8 +932,6 @@ if (commandName === "myxp") {
     }
 }
   if (commandName === 'gachas') {
-     ()
-
     /* =====================
        /gachas inventory
     ===================== */
