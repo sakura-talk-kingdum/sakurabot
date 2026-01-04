@@ -105,12 +105,13 @@ async function editSet(id){
 
   const channel_id = prompt('チャンネルID')
   const trigger_word = prompt('トリガー')
+  const enabled = prompt('有効にする？ (TRUE/FALSE)') 
 
   await fetch(`${API}/sets/${id}`,{
     method:'PUT',
     credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ name, channel_id, trigger_word })
+    body:JSON.stringify({ name, channel_id, trigger_word ,enabled })
   })
   loadSets()
 }

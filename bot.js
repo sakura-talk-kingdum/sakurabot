@@ -1343,56 +1343,40 @@ if (!sent) return;
 
 client.on("messageCreate", async message => {
   if (message.author.bot) return;
-  if (message.guild === null) return;
-  console.log('MC OK');
-  // shard 0 以外はDB触らない
-// shardが定義されていて、0以外なら弾く
-if (client.shard && client.shard.ids[0] !== 0) return;
-console.log('shard OK');
-   /* ガチャ設定取得 */
-  const { data: sets } = await supabase
-    .from('gacha_sets')
-    .select('*')
-    .eq('guild_id', "guild")
-    .eq('enabled', true)
-  console.log('sql ok');
-  if (!sets || sets.length === 0) {
-    return
-    console.log('no gachas');
-  }
+  if (!message.guild) return;
 
-  /* 該当ガチャだけ処理 */
-  for (const set of sets) {
-  console.log('gachas enabled');
-    /* チャンネル一致 */
-    if (message.channel.id !== set.channel_id) {
-      continue
-      console.log('channel mismatch');
-    }
+  // shard 0 のみ副作用OK
+  const isShard0 = !client.shard || client.shard.ids[0] === 0;
 
-    /* トリガー一致（完全一致） */
-    if (message.content.trim() === set.trigger_word) {
-      console.log('Gacha triggered:', set.name)
+  /* ===== ガチャ処理（あっても無くてもOK） ===== */
+  if (isShard0) {
+    const { data: sets } = await supabase
+      .from('gacha_sets')
+      .select('*')
+      .eq('guild_id', 'guild')
+      .eq('enabled', TRUE);
 
-      /* ===== ガチャ処理 ===== */
-      await runGacha(message, set)
+    if (sets?.length) {
+      for (const set of sets) {
+        if (message.channel.id !== set.channel_id) continue;
+        if (message.content.trim() !== set.trigger_word) continue;
 
-      /* 同じメッセージで複数ガチャは引かせない */
-      break
-      console.log('break');
+        await runGacha(message, set);
+        break;
+      }
     }
   }
-  console.log('else');
-  // ===== AIチャンネル =====
+
+  /* ===== 以下は常に動く ===== */
+
   if (message.channel.id === AI_CHANNEL_ID) {
-    return handleAI();
+    return handleAI(message);
   }
 
-  // ===== 固定メッセージ更新 =====
-  await handlePinned(message);
-
-  // ===== XP加算 =====
-  await addUserExperience(message.author.id, "text");
+  if (isShard0) {
+    await handlePinned(message);
+    await addUserExperience(message.author.id, "text");
+  }
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）

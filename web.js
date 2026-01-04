@@ -754,17 +754,28 @@ app.post('/gachas/sets', requireAuth, requireAdmin, cors({origin: ['https://bot.
   res.status(201).json(data)
 })
 
-app.put('/gachas/sets/:id', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
-  const { id } = req.params;
-  const { name, channel_id, trigger_word } = req.body;
+app.patch('/gachas/sets/:setid', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+  const { setid } = req.params;
+  const { name, channel_id, trigger_word, enabled } = req.body;
 
-  const { error } = await supabase
-    .from('gacha_sets')
-    .update({ name, channel_id, trigger_word })
-    .eq('id', id);
+  const update = {};
+   if (name !== undefined) update.name = name;
+   if (channel_id !== undefined) update.channel_id = channel_id;
+   if (trigger_word !== undefined) update.trigger_word = trigger_word;
+   if (enabled !== undefined) update.enabled = enabled;
 
-  if (error) return res.status(500).json(error);
-  res.json({ ok: true });
+    // 何も変更が無い場合
+    if (Object.keys(update).length === 0) {
+      return res.status(204).json({ message: '更新内容がありません' })
+    }
+
+const { error } = await supabase
+  .from('gacha_sets')
+  .update(update)
+  .eq('id', setid);
+
+  if (error) return res.status(500).json(error)
+  res.json({ ok: true })
 });
 
 
@@ -818,20 +829,33 @@ app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: [
   res.status(201).json({ ok: true })
 })
 
-app.put('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
-  const { setId, itemId } = req.params
+app.patch('/gachas/sets/:setId/items/:itemId',  requireAuth,  requireAdmin,  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }),  async (req, res) => {
+    const { setId, itemId } = req.params
+    const { name, description, amount, rarity } = req.body
 
-  const { error } = await supabase
-    .from('gacha_items')
-    .update(req.body)
-    .eq('id', itemId)
-    .eq('set_id', setId)
+    const update = {}
+    if (name !== undefined) update.name = name
+    if (description !== undefined) update.description = description
+    if (amount !== undefined) update.amount = amount
+    if (rarity !== undefined) update.rarity = rarity
 
-  if (error) return res.status(500).json(error)
+    // 何も変更が無い場合
+    if (Object.keys(update).length === 0) {
+      return res.status(204).json({ message: '更新内容がありません' })
+    }
 
-  await recalcProbabilitiesBySet(setId)
-  res.json({ ok: true })
-})
+    const { error } = await supabase
+      .from('gacha_items')
+      .update(update)
+      .eq('id', itemId)
+      .eq('set_id', setId)
+
+    if (error) return res.status(500).json(error)
+
+    await recalcProbabilitiesBySet(setId)
+    res.json({ ok: true })
+  }
+)
 
 app.delete('/gachas/sets/:setId/items/:itemId', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
   const { setId, itemId } = req.params
