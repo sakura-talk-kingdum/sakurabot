@@ -1356,7 +1356,7 @@ if (!selectedRarity) return
     .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
-  await message.reply({ embeds: [embed] })
+  await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
 client.on("messageCreate", async message => {
