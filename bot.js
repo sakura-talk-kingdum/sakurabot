@@ -1292,33 +1292,50 @@ if (!sent) return;
   }
  }
 
- async function runGacha(message, set) {
+async function runGacha(message, set) {
   console.log('guild', message.guild.id)
   console.log('channel', message.channel.id)
   console.log('content', message.content)
   console.log('set', set.name)
-  
-  const { data: items } = await supabase
+
+  const { data: items, error } = await supabase
     .from('gacha_items')
     .select('*')
     .eq('set_id', set.id)
 
-  if (!items || items.length === 0) {
-    return
+  if (error || !items || items.length === 0) return
+
+  /* ===== レアリティ抽選（DBの確率を使う） ===== */
+  const probabilities = JSON.parse(set.probabilities) // { common: xx, rare: xx }
+
+  let rand = Math.random() * 100
+  let acc = 0
+  let selectedRarity = null
+
+  for (const [rarity, percent] of Object.entries(probabilities)) {
+    acc += percent
+    if (rand <= acc) {
+      selectedRarity = rarity
+      break
+    }
   }
 
-  /* 重み抽選 */
+  if (!selectedRarity) return
+
+  /* ===== アイテム抽選（amountのみ） ===== */
+  const candidates = items.filter(i => i.rarity === selectedRarity)
+  if (candidates.length === 0) return
+
   let pool = []
-  for (const i of items) {
-    const w = RARITY_WEIGHT[i.rarity] || 1
-    for (let n = 0; n < i.amount * w; n++) {
+  for (const i of candidates) {
+    for (let n = 0; n < i.amount; n++) {
       pool.push(i)
     }
   }
 
   const hit = pool[Math.floor(Math.random() * pool.length)]
 
-  /* ログ保存 */
+  /* ===== ログ保存 ===== */
   await supabase.from('gacha_logs').insert({
     user_id: message.author.id,
     guild_id: message.guild.id,
@@ -1328,14 +1345,11 @@ if (!sent) return;
     rarity: hit.rarity
   })
 
-  /* Embed */
+  /* ===== Embed ===== */
   const embed = new EmbedBuilder()
     .setTitle(`🎰 ${set.name}`)
     .setDescription(`**${hit.name}**`)
-    .addFields(
-      { name: 'レアリティ', value: hit.rarity, inline: true }
-    )
-    .setFooter({ text: `ID: ${hit.id}` })
+    .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
   await message.reply({ embeds: [embed] })
