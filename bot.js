@@ -1306,21 +1306,25 @@ async function runGacha(message, set) {
   if (error || !items || items.length === 0) return
 
   /* ===== レアリティ抽選（DBの確率を使う） ===== */
-  const probabilities = JSON.parse(set.probabilities) // { common: xx, rare: xx }
+/* ===== レアリティ抽選 ===== */
+const probabilities =
+  typeof set.probabilities === 'string'
+    ? JSON.parse(set.probabilities)
+    : set.probabilities
 
-  let rand = Math.random() * 100
-  let acc = 0
-  let selectedRarity = null
+let rand = Math.random() * 100
+let acc = 0
+let selectedRarity = null
 
-  for (const [rarity, percent] of Object.entries(probabilities)) {
-    acc += percent
-    if (rand <= acc) {
-      selectedRarity = rarity
-      break
-    }
+for (const [rarity, percent] of Object.entries(probabilities)) {
+  acc += percent
+  if (rand <= acc) {
+    selectedRarity = rarity
+    break
   }
+}
 
-  if (!selectedRarity) return
+if (!selectedRarity) return
 
   /* ===== アイテム抽選（amountのみ） ===== */
   const candidates = items.filter(i => i.rarity === selectedRarity)
