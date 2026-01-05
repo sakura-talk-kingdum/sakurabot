@@ -328,7 +328,7 @@ client.on('interactionCreate', async interaction => {
     const adminPermissionLevelRequired = 8;
     const userPermissionLevel = interaction.member?.permissions?.bitfield ?? 0;
   if (!interaction.isChatInputCommand()) return;
-  console.log("🔥 command:", interaction., "sub:", interaction.options.getSubcommand(false));
+  console.log("🔥 command:", interaction.commandName, "sub:", interaction.options.getSubcommand(false));
   const { commandName } = interaction;
   const { sub } = interaction.options.getSubcommand;
 
