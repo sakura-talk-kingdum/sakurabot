@@ -328,9 +328,9 @@ client.on('interactionCreate', async interaction => {
     const adminPermissionLevelRequired = 8;
     const userPermissionLevel = interaction.member?.permissions?.bitfield ?? 0;
   if (!interaction.isChatInputCommand()) return;
-  console.log("🔥 command:", commandName, "sub:", interaction.options.getSubcommand(false));
+  console.log("🔥 command:", interaction., "sub:", interaction.options.getSubcommand(false));
   const { commandName } = interaction;
-  const {sub} = interaction.options.getSubcommand;
+  const { sub } = interaction.options.getSubcommand;
 
   if (commandName === 'ping') {
 
@@ -1354,7 +1354,7 @@ client.on("messageCreate", async message => {
       .from('gacha_sets')
       .select('*')
       .eq('guild_id', 'guild')
-      .eq('enabled', TRUE);
+      .eq('enabled', true);
 
     if (sets?.length) {
       for (const set of sets) {
