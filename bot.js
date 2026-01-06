@@ -561,10 +561,11 @@ client.on('interactionCreate', async interaction => {
 
       return interaction.reply({ content: '🗑️ 固定メッセージを解除しました！', flags: MessageFlags.Ephemeral});
     }
-  /* ---------- /timeout ---------- */
+  /* ===== timeout ===== */
   if (commandName === 'timeout') {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      return interaction.reply({ content: '権限がありません', ephemeral: true })
+      await interaction.reply({ content: '権限がありません', ephemeral: true })
+      return
     }
 
     const user = interaction.options.getUser('user')
@@ -573,14 +574,15 @@ client.on('interactionCreate', async interaction => {
 
     const duration = parseDuration(timeStr)
     if (!duration || duration <= 0) {
-      return interaction.reply({ content: '時間指定が不正です', ephemeral: true })
+      await interaction.reply({ content: '時間指定が不正です', ephemeral: true })
+      return
     }
 
     const member = await interaction.guild.members.fetch(user.id)
 
-    // Botのロール位置チェック（重要）
     if (!member.moderatable) {
-      return interaction.reply({ content: 'このユーザーはタイムアウトできません', ephemeral: true })
+      await interaction.reply({ content: 'このユーザーはタイムアウトできません', ephemeral: true })
+      return
     }
 
     await member.timeout(duration, reason)
@@ -588,19 +590,22 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({
       content: `⏱ **${user.tag}** を **${timeStr}** タイムアウトしました`
     })
+    return
   }
 
-  /* ---------- /untimeout ---------- */
+  /* ===== untimeout ===== */
   if (commandName === 'untimeout') {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      return interaction.reply({ content: '権限がありません', ephemeral: true })
+      await interaction.reply({ content: '権限がありません', ephemeral: true })
+      return
     }
 
     const user = interaction.options.getUser('user')
     const member = await interaction.guild.members.fetch(user.id)
 
     if (!member.moderatable) {
-      return interaction.reply({ content: 'このユーザーは解除できません', ephemeral: true })
+      await interaction.reply({ content: 'このユーザーは解除できません', ephemeral: true })
+      return
     }
 
     await member.timeout(null)
@@ -608,8 +613,8 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({
       content: `✅ **${user.tag}** のタイムアウトを解除しました`
     })
+    return
   }
-})
 
 //-/play ---
   if (commandName === 'play') {
