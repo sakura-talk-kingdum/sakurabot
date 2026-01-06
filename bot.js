@@ -179,6 +179,23 @@ export async function handleOAuthCallback({ code, ip }) {
   return `<h1>認証完了 🎉 ${user.username} さん</h1>`;
 }
 
+function parseDuration(str) {
+  const regex = /(\d+)\s*(d|h|m|s)/gi
+  let ms = 0
+
+  for (const m of str.matchAll(regex)) {
+    const v = Number(m[1])
+    const u = m[2].toLowerCase()
+
+    if (u === 'd') ms += v * 86400000
+    if (u === 'h') ms += v * 3600000
+    if (u === 'm') ms += v * 60000
+    if (u === 's') ms += v * 1000
+  }
+
+  return ms
+}
+
 // --- commands registration ---
 const commands = [
   
@@ -208,6 +225,34 @@ const commands = [
     .setName('unpin')
     .setDescription('チャンネルの固定メッセージを解除します')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
+
+  new SlashCommandBuilder()
+    .setName('timeout')
+    .setDescription('ユーザーをタイムアウトします')
+    .addUserOption(o =>
+      o.setName('user')
+        .setDescription('対象ユーザー')
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName('time')
+        .setDescription('時間 (例: 1h 10m)')
+        .setRequired(true)
+    )
+    .addStringOption(o =>
+      o.setName('reason')
+        .setDescription('理由')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('untimeout')
+    .setDescription('タイムアウトを解除します')
+    .addUserOption(o =>
+      o.setName('user')
+        .setDescription('対象ユーザー')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('play')
@@ -516,7 +561,56 @@ client.on('interactionCreate', async interaction => {
 
       return interaction.reply({ content: '🗑️ 固定メッセージを解除しました！', flags: MessageFlags.Ephemeral});
     }
-  
+  /* ---------- /timeout ---------- */
+  if (commandName === 'timeout') {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
+      return interaction.reply({ content: '権限がありません', ephemeral: true })
+    }
+
+    const user = interaction.options.getUser('user')
+    const timeStr = interaction.options.getString('time')
+    const reason = interaction.options.getString('reason') ?? '理由なし'
+
+    const duration = parseDuration(timeStr)
+    if (!duration || duration <= 0) {
+      return interaction.reply({ content: '時間指定が不正です', ephemeral: true })
+    }
+
+    const member = await interaction.guild.members.fetch(user.id)
+
+    // Botのロール位置チェック（重要）
+    if (!member.moderatable) {
+      return interaction.reply({ content: 'このユーザーはタイムアウトできません', ephemeral: true })
+    }
+
+    await member.timeout(duration, reason)
+
+    await interaction.reply({
+      content: `⏱ **${user.tag}** を **${timeStr}** タイムアウトしました`
+    })
+  }
+
+  /* ---------- /untimeout ---------- */
+  if (commandName === 'untimeout') {
+    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
+      return interaction.reply({ content: '権限がありません', ephemeral: true })
+    }
+
+    const user = interaction.options.getUser('user')
+    const member = await interaction.guild.members.fetch(user.id)
+
+    if (!member.moderatable) {
+      return interaction.reply({ content: 'このユーザーは解除できません', ephemeral: true })
+    }
+
+    await member.timeout(null)
+
+    await interaction.reply({
+      content: `✅ **${user.tag}** のタイムアウトを解除しました`
+    })
+  }
+})
+
 //-/play ---
   if (commandName === 'play') {
 
