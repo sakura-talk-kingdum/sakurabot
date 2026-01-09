@@ -346,16 +346,17 @@ new SlashCommandBuilder()
       .setDescription("録音コマンド")
       .addSubcommand(sc => sc.setName("start").setDescription("録音開始"))
       .addSubcommand(sc => sc.setName("stop").setDescription("録音停止"))
+
+    new SlashCommandBuilder()
+    .setName('imihubun')
+    .setDescription('[飼育員]imihubunを送信')
+    .addChannelOption(opt =>
+      opt
+        .setName('channel')
+        .setDescription('送信先チャンネル')
+        .setRequired(true)
+    ),
     ].map(c => c.toJSON());
-new SlashCommandBuilder()
-  .setName('imihubun')
-  .setDescription('[飼育員]imihubunを送信')
-  .addChannelOption(opt =>
-    opt
-      .setName('channel')
-      .setDescription('送信先チャンネル')
-      .setRequired(true)
-  ),
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
 
