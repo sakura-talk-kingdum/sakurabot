@@ -346,7 +346,7 @@ new SlashCommandBuilder()
       .setName("record")
       .setDescription("録音コマンド")
       .addSubcommand(sc => sc.setName("start").setDescription("録音開始"))
-      .addSubcommand(sc => sc.setName("stop").setDescription("録音停止"))
+      .addSubcommand(sc => sc.setName("stop").setDescription("録音停止")),
 
     new SlashCommandBuilder()
       .setName('imihubun')
@@ -355,7 +355,7 @@ new SlashCommandBuilder()
           option.setName('channel')
         .setDescription('送信先チャンネル')
         .setRequired(true)
-    ),
+    )
     ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
