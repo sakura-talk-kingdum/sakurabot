@@ -781,8 +781,7 @@ client.on('interactionCreate', async interaction => {
     // ロールチェック
     if (!interaction.member.roles.cache.has(shiikurole)) {
       await interaction.reply({
-        content: '❌ このコマンドを使用する権限がありません',
-        flags: MessageFlags.Ephemeral
+        content: '❌ このコマンドを使用する権限がありません'
       });
       return;
     }
@@ -792,8 +791,7 @@ client.on('interactionCreate', async interaction => {
     // テキストチャンネル確認
     if (!channel.isTextBased()) {
       await interaction.reply({
-        content: '❌ テキストチャンネルを指定してください',
-        flags: MessageFlags.Ephemeral
+        content: '❌ テキストチャンネルを指定してください'
       });
       return;
     }
@@ -823,8 +821,7 @@ client.on('interactionCreate', async interaction => {
    
     await channel.send(main_text + footer);
   
-    await interaction.reply({
-      content: `✅ <#${channel.id}> に送信しました`});
+    await interaction.reply({content: `✅ <#${channel.id}> に送信しました`});
   }
 
   if (!interaction.replied && !interaction.deferred) {
