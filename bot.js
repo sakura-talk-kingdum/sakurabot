@@ -1594,24 +1594,20 @@ cron.schedule(
       // 3. ランダムに一つ選択
       const pick = unused[Math.floor(Math.random() * unused.length)];
       if (!pick) return console.log("⚠️ No odai found.");
-
-      // 4. Discord送信
-      const channel = await client.channels.fetch(DISCORD_CHAT_CHANNEL_ID);
-      await channel.send({
-        embeds: [
-          {
-            title: "今日のお題",
-            description: pick.text,
-            color: 0x00bfff,
-            // メンションを有効にしたい場合は description に含めるのがおすすめ
-            footer: { text: `ID: ${pick.id} | 次回のリセットまで残り ${unused.length - 1} 件` },
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      });
-
-      console.log("✨ Sent:", pick.text);
-
+      const channel = client.channels.cache.get(DISCORD_CHAT_CHANNEL_ID);
+        channel.send({
+          embeds: [
+            {
+              title: "今日のお題",
+              description: pick.text,
+              color: 0x00bfff,
+              // メンションを有効にしたい場合は description に含めるのがおすすめ
+              footer: { text: `ID: ${pick.id} | 次回のリセットまで残り ${unused.length - 1} 件` },
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        });
+        console.log("✨ Sent:", pick.text);
       // 5. 使用済みに更新
       await supabase
         .from("odai")
