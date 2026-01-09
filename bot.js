@@ -400,7 +400,8 @@ client.on('interactionCreate', async interaction => {
     // CPU使用率
     const loadData = os.cpus;
     const cpuLoadInfo = await si.currentLoad();
-    const cpuLoad = cpuLoadInfo.currentload.toFixed
+    const cpuLoad = cpuLoadInfo.currentLoad.toFixed(2);
+
     // メモリ
     const mem = await si.mem().catch(() => ({ total: 0, available: 0 }));
     const memUsed = mem.total && mem.available ? ((mem.total - mem.available) / 1024 / 1024 / 1024).toFixed(2) : '0';
