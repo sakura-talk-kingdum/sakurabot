@@ -82,6 +82,13 @@ const indicators = "abcdefghijklmnopqrstuvwxyz".split("").map(letter => ({
 
 const wait = ms => new Promise(res => setTimeout(res, ms));
 
+// 意味不明単語ジェネレーターのワードリストを読み込む。/imihubunの実装。by imme
+let wordData = null;
+(async () => {
+  const res = await fetch('https://povo-43.github.io/imihubun/words.json');
+  wordData = await res.json();
+})();
+
 // --- IP helpers ---
 export function hashIP(ip) {
   return crypto.createHash('sha256').update(ip).digest('hex');
@@ -340,6 +347,15 @@ new SlashCommandBuilder()
       .addSubcommand(sc => sc.setName("start").setDescription("録音開始"))
       .addSubcommand(sc => sc.setName("stop").setDescription("録音停止"))
     ].map(c => c.toJSON());
+new SlashCommandBuilder()
+  .setName('imihubun')
+  .setDescription('[飼育員]imihubunを送信')
+  .addChannelOption(opt =>
+    opt
+      .setName('channel')
+      .setDescription('送信先チャンネル')
+      .setRequired(true)
+  ),
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
 
@@ -757,6 +773,60 @@ client.on('interactionCreate', async interaction => {
       interaction.reply("エラー:" + e);
     }
   }
+
+  // 環境変数がさわれないため直書き。飼育員ロール。by imme
+  const IMIHUBUN_ROLE_ID = '1210182429818757181';
+  if (commandName === 'imihubun') {
+    // ロールチェック
+    if (!interaction.member.roles.cache.has(IMIHUBUN_ROLE_ID)) {
+      await interaction.reply({
+        content: '❌ このコマンドを使用する権限がありません',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+  
+    const channel = interaction.options.getChannel('channel');
+  
+    // テキストチャンネル確認
+    if (!channel.isTextBased()) {
+      await interaction.reply({
+        content: '❌ テキストチャンネルを指定してください',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+    
+    await channel.send(
+    Math.random() > 0.5
+      ? (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        ) + ' ' + (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        )
+      : (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        )
+  );
+  
+    await interaction.reply({
+      content: `✅ <#${channel.id}> に送信しました`,
+      flags: MessageFlags.Ephemeral
+    });
+  }
+
   if (!interaction.replied && !interaction.deferred) {
   interaction.reply({ content: '❌ エラーが発生しました', flags: 64 })
   .catch(console.error);
