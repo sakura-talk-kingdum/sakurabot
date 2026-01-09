@@ -47,7 +47,8 @@ const {
   DISCORD_CHAT_CHANNEL_ID,
   DISCORD_MOD_LOG_CHANNEL_ID,
   VPN_API_KEY,
-  REDIRECT_URI
+  REDIRECT_URI,
+  shiikurole
 } = process.env;
 
 if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_ROLE_ID || !VPN_API_KEY || !REDIRECT_URI) {
@@ -348,11 +349,10 @@ new SlashCommandBuilder()
       .addSubcommand(sc => sc.setName("stop").setDescription("録音停止"))
 
     new SlashCommandBuilder()
-    .setName('imihubun')
-    .setDescription('[飼育員]imihubunを送信')
-    .addChannelOption(opt =>
-      opt
-        .setName('channel')
+      .setName('imihubun')
+      .setDescription('[飼育員]imihubunを送信')
+      .addChannelOption(option =>
+          option.setName('channel')
         .setDescription('送信先チャンネル')
         .setRequired(true)
     ),
@@ -777,10 +777,9 @@ client.on('interactionCreate', async interaction => {
   }
 
   // 環境変数がさわれないため直書き。飼育員ロール。by imme
-  const IMIHUBUN_ROLE_ID = '1210182429818757181';
   if (commandName === 'imihubun') {
     // ロールチェック
-    if (!interaction.member.roles.cache.has(IMIHUBUN_ROLE_ID)) {
+    if (!interaction.member.roles.cache.has(shiikurole)) {
       await interaction.reply({
         content: '❌ このコマンドを使用する権限がありません',
         flags: MessageFlags.Ephemeral
