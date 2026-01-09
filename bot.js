@@ -798,7 +798,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    const footer = "\n\n-# by 意味不文ジェネレーター";
+    const footer = "\n-# by 意味不文ジェネレーター";
     const main_text = Math.random() > 0.5
       ? (
           wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
