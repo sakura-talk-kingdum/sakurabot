@@ -798,7 +798,7 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    const footer = "\n\n-# by 意味不文ジェネレーター":
+    const footer = "\n\n-# by 意味不文ジェネレーター";
     const main_text = Math.random() > 0.5
       ? (
           wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
@@ -824,9 +824,7 @@ client.on('interactionCreate', async interaction => {
     await channel.send(main_text + footer);
   
     await interaction.reply({
-      content: `✅ <#${channel.id}> に送信しました`,
-      flags: MessageFlags.Ephemeral
-    });
+      content: `✅ <#${channel.id}> に送信しました`});
   }
 
   if (!interaction.replied && !interaction.deferred) {
