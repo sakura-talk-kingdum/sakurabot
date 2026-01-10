@@ -406,7 +406,7 @@ new SlashCommandBuilder()
         { name: "短文", value: "SHORT" },
         { name: "長文", value: "PARA" }
       ) 
-  )
+  ),
 
   // ---------- /modalview ----------
   new SlashCommandBuilder()
