@@ -1871,41 +1871,53 @@ client.once('ready', async () => {
   });
 
 setInterval(async () => {
-  const now = new Date();
+  try {
+    const now = new Date();
 
-  const { data: settings } = await supabase.from("bump_settings").select("*");
+    // 1. settings の取得（nullガードを追加）
+    const { data: settings, error: sError } = await supabase.from("bump_settings").select("*");
+    if (sError || !settings) return; // 取得失敗時は次の10秒後にリトライ
 
-  for (const s of settings) {
-    const { data: logs } = await supabase
-      .from("bump_logs")
-      .select("*")
-      .eq("bot_id", s.bot_id);
+    for (const s of settings) {
+      // 2. logs の取得（nullガードを追加）
+      const { data: logs, error: lError } = await supabase
+        .from("bump_logs")
+        .select("*")
+        .eq("bot_id", s.bot_id);
 
-    for (const log of logs) {
-      const detected = new Date(log.detected_at);
-      const diff = (now - detected) / 1000 / 60; // 分
+      if (lError || !logs) continue; // このbotのログ取得に失敗したら次へ
 
-      if (diff >= s.wait_minutes) {
-        const channel = client.channels.cache.get(log.channel_id);
-        if (channel) {
-          channel.send({
-            content: `<&@1209371709451272215> 時間だよ！⏰  
-</​up:${log.command_id}> を実行してね！`,
-            embeds: [
-              {
-                title: "bump リマインド",
-                description: `検出から${s.wait_minutes}分経過したよ！`,
-                timestamp: new Date().toISOString()
-              }
-            ]
-          });
+      for (const log of logs) {
+        const detected = new Date(log.detected_at);
+        const diff = (now - detected) / 1000 / 60;
+
+        if (diff >= s.wait_minutes) {
+          const channel = client.channels.cache.get(log.channel_id);
+          if (channel) {
+            // エラーでループを止めないよう、送信処理も try-catch 推奨
+            try {
+              await channel.send({
+                content: `<@&1209371709451272215> 時間だよ！⏰\n</up:${log.command_id}> を実行してね！`,
+                embeds: [{
+                  title: "bump リマインド",
+                  description: `検出から${s.wait_minutes}分経過したよ！`,
+                  timestamp: new Date().toISOString()
+                }]
+              });
+            } catch (err) {
+              console.error("メッセージ送信失敗:", err);
+            }
+          }
+
+          // 3. 削除処理
+          await supabase.from("bump_logs").delete().eq("id", log.id);
         }
-
-        await supabase.from("bump_logs").delete().eq("id", log.id);
       }
     }
+  } catch (globalError) {
+    console.error("Interval内エラー:", globalError);
   }
-}, 10_000); // 10秒ごとにチェック
+}, 10_000);
 
   setInterval(() => {
     const pingNow = Math.round(client.ws.ping);
