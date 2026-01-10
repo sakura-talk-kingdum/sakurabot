@@ -359,7 +359,7 @@ new SlashCommandBuilder()
           option.setName('channel')
         .setDescription('送信先チャンネル')
         .setRequired(true),
-
+      ),
 new SlashCommandBuilder()
   .setName("modal")
   .setDescription("モーダル版投票を作成")
@@ -406,7 +406,7 @@ new SlashCommandBuilder()
         { name: "短文", value: "SHORT" },
         { name: "長文", value: "PARA" }
       ) 
-  );
+  )
 
   // ---------- /modalview ----------
   new SlashCommandBuilder()
@@ -415,7 +415,6 @@ new SlashCommandBuilder()
     .addStringOption(option => option.setName("id").setRequired(true))
     .addBooleanOption(option => option.setName("csv"))
 
-    )
     ].map(c => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
