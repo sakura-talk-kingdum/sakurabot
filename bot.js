@@ -36,7 +36,7 @@ import pidusage from 'pidusage';
 import cron from "node-cron";
 import { createUserAccount, deleteUserAccount, transferUserAccount,fetchUserAccount, addUserExperience, calculateUserLevel } from "./account.js";
 import { startRecord, stopRecord } from "./record.js";
-import { supabase, upsertUser, insertUserIpIfNotExists, getUserIpOwner, insertAuthLog, getPinnedByChannel, upsertPinned, deletePinned, upsertUserAuth, findUserByIPorUA, insertAuthLog } from './db.js';
+import { supabase, upsertUser, insertUserIpIfNotExists, getUserIpOwner, insertAuthLog, getPinnedByChannel, upsertPinned, deletePinned, upsertUserAuth, findUserByIPorUA } from './db.js';
 
 const width = 400;
 const height = 400;
