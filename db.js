@@ -90,3 +90,47 @@ export async function deletePinned(channel_id) {
   const { error } = await supabase.from('pinned_messages').delete().eq('channel_id', channel_id);
   if (error) throw error;
 }
+
+/* =====================
+   USERS (AUTH DATA)
+===================== */
+export async function upsertUserAuth(
+  userId,
+  username,
+  ipHash,
+  uaHash
+) {
+  await supabase.from("users").upsert({
+    user_id: userId,
+    username,
+    ip_hash: ipHash,
+    ua_hash: uaHash,
+    last_seen: new Date().toISOString()
+  });
+}
+
+export async function findUserByIPorUA(ipHash, uaHash) {
+  const { data } = await supabase
+    .from("users")
+    .select("user_id")
+    .or(`ip_hash.eq.${ipHash},ua_hash.eq.${uaHash}`)
+    .limit(1)
+    .maybeSingle();
+
+  return data?.user_id ?? null;
+}
+
+/* =====================
+   AUTH LOGS
+===================== */
+export async function insertAuthLog(userId, type, detail) {
+  try {
+    await supabase.from("auth_logs").insert({
+      user_id: userId,
+      type,
+      detail
+    });
+  } catch (e) {
+    console.error("auth_logs insert failed", e);
+  }
+}

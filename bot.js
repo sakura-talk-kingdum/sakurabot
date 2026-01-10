@@ -36,7 +36,7 @@ import pidusage from 'pidusage';
 import cron from "node-cron";
 import { createUserAccount, deleteUserAccount, transferUserAccount,fetchUserAccount, addUserExperience, calculateUserLevel } from "./account.js";
 import { startRecord, stopRecord } from "./record.js";
-import { supabase, upsertUser, insertUserIpIfNotExists, getUserIpOwner, insertAuthLog, getPinnedByChannel, upsertPinned, deletePinned } from './db.js';
+import { supabase, upsertUser, insertUserIpIfNotExists, getUserIpOwner, insertAuthLog, getPinnedByChannel, upsertPinned, deletePinned, upsertUserAuth, findUserByIPorUA, insertAuthLog } from './db.js';
 
 const width = 400;
 const height = 400;
@@ -94,101 +94,187 @@ let wordData = null;
   wordData = await res.json();
 })();
 
-// --- IP helpers ---
-export function hashIP(ip) {
-  return crypto.createHash('sha256').update(ip).digest('hex');
+function sha256(v) {
+  return crypto.createHash("sha256").update(v).digest("hex");
 }
 
-export function extractGlobalIP(ipString) {
+function normalizeIP(ip) {
+  if (!ip) return null;
+  if (ip.startsWith("::ffff:")) return ip.replace("::ffff:", "");
+  return ip;
+}
+
+function isGlobalIP(ip) {
+  if (!ip) return false;
+  return !(
+    ip.startsWith("10.") ||
+    ip.startsWith("192.168.") ||
+    ip.startsWith("172.16.") ||
+    ip === "127.0.0.1" ||
+    ip === "::1" ||
+    ip.startsWith("fc") ||
+    ip.startsWith("fe80")
+  );
+}
+
+function extractGlobalIP(ipString) {
   if (!ipString) return null;
-  const ips = ipString.split(',').map(ip => ip.trim());
-  for (const ip of ips) if (isGlobalIP(ip)) return ip;
+  const ips = ipString.split(",").map(i => normalizeIP(i.trim()));
+  for (const ip of ips) {
+    if (isGlobalIP(ip)) return ip;
+  }
   return null;
 }
 
-export function isGlobalIP(ip) {
-  if (!ip) return false;
-  if (
-    ip.startsWith('10.') ||
-    ip.startsWith('192.168.') ||
-    ip.startsWith('172.16.') ||
-    ip === '127.0.0.1' ||
-    ip === '::1' ||
-    ip.startsWith('fc') ||
-    ip.startsWith('fe80')
-  ) return false;
-  return true;
-}
+/* =====================
+   VPN CHECK
+===================== */
+async function checkVPN(ip) {
+  if (!isGlobalIP(ip)) return true;
 
-export async function checkVPN(ip) {
   try {
-    const res = await fetch(`https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`);
+    const res = await fetch(
+      `https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`,
+      { timeout: 5000 }
+    );
+    if (!res.ok) return true;
+
     const data = await res.json();
-    return data.security && (data.security.vpn || data.security.proxy || data.security.tor || data.security.relay);
-  } catch (e) {
-    console.warn('VPN check failed', e);
-    return false;
+    const s = data?.security;
+    return Boolean(s?.vpn || s?.proxy || s?.tor || s?.relay);
+  } catch {
+    return true;
   }
 }
 
-// --- OAuth callback ---
-export async function handleOAuthCallback({ code, ip }) {
-  if (!code || !ip) throw new Error('認証情報が不正です');
-  const ipHash = hashIP(ip);
+/* =====================
+   RATE LIMIT
+===================== */
+const rateMap = new Map();
+function checkRateLimit(ipHash) {
+  const now = Date.now();
+  const limit = 5;
+  const windowMs = 60_000;
 
-  // token
-  const basicAuth = Buffer.from(`${DISCORD_CLIENT_ID}:${DISCORD_CLIENT_SECRET}`).toString('base64');
-  const tokenRes = await fetch('https://discord.com/api/v10/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${basicAuth}` },
-    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: REDIRECT_URI })
-  });
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error('トークン取得失敗');
+  const arr = (rateMap.get(ipHash) || []).filter(
+    t => now - t < windowMs
+  );
+  arr.push(now);
+  rateMap.set(ipHash, arr);
 
-  const userRes = await fetch('https://discord.com/api/users/@me', {
-    headers: { Authorization: `Bearer ${tokenData.access_token}` }
-  });
-  const user = await userRes.json();
-  if (!user.id) throw new Error('ユーザー情報取得失敗');
+  return arr.length <= limit;
+}
 
-  const isVpn = await checkVPN(ip);
-  if (isVpn) {
-    await insertAuthLog(user.id, 'vpn_detected', `IP:${ip}`);
-    throw new Error('VPN検知');
-  }
-
-  const ownerDiscordId = await getUserIpOwner(ipHash);
-  if (ownerDiscordId && ownerDiscordId !== user.id) {
-    await insertAuthLog(user.id, 'sub_account_blocked', `IP重複 IP:${ipHash}`);
-    throw new Error('サブアカウント検知');
-  }
-
-  // DB upsert user
-  await upsertUser(user.id, user.username);
-
-  if (!ownerDiscordId) {
-    await insertUserIpIfNotExists(user.id, ipHash);
-  }
-
-  await insertAuthLog(user.id, 'auth_success', `認証成功 IP:${ipHash}`);
-
-  // role & notifications
-  const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-  const member = await guild.members.fetch(user.id);
-  if (!member.roles.cache.has(DISCORD_ROLE_ID)) await member.roles.add(DISCORD_ROLE_ID).catch(() => {});
-
+/* =====================
+   OAUTH CALLBACK
+===================== */
+export async function handleOAuthCallback(req, res) {
   try {
-    const chatChan = await guild.channels.fetch(DISCORD_CHAT_CHANNEL_ID);
-    if (chatChan?.isTextBased()) chatChan.send(`🎉 ようこそ <@${user.id}> さん！`).catch(() => {});
-  } catch {}
+    const { code } = req.query;
+    const ip =
+      req.headers["x-forwarded-for"] ||
+      req.socket.remoteAddress;
+    const ua = req.headers["user-agent"] || "unknown";
 
-  try {
-    const modChan = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
-    if (modChan?.isTextBased()) modChan.send(`📝 認証成功: <@${user.id}> (${user.username}) IPハッシュ: \`${ipHash}\``).catch(() => {});
-  } catch {}
+    if (!code || !ip) throw new Error("認証情報が不正です");
 
-  return `<h1>認証完了 🎉 ${user.username} さん</h1>`;
+    const globalIP = extractGlobalIP(ip);
+    if (!globalIP) throw new Error("有効なIPが取得できません");
+
+    const ipHash = sha256(globalIP);
+    const uaHash = sha256(ua);
+
+    if (!checkRateLimit(ipHash)) {
+      await insertAuthLog(null, "rate_limited", `IP:${ipHash}`);
+      throw new Error("認証試行が多すぎます");
+    }
+
+    /* --- token --- */
+    const basic = Buffer
+      .from(`${DISCORD_CLIENT_ID}:${DISCORD_CLIENT_SECRET}`)
+      .toString("base64");
+
+    const tokenRes = await fetch(
+      "https://discord.com/api/v10/oauth2/token",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${basic}`
+        },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: REDIRECT_URI
+        })
+      }
+    );
+
+    const token = await tokenRes.json();
+    if (!token.access_token) throw new Error("トークン取得失敗");
+
+    /* --- user --- */
+    const userRes = await fetch(
+      "https://discord.com/api/users/@me",
+      { headers: { Authorization: `Bearer ${token.access_token}` } }
+    );
+    const user = await userRes.json();
+    if (!user?.id) throw new Error("ユーザー取得失敗");
+
+    /* --- VPN --- */
+    if (await checkVPN(globalIP)) {
+      await insertAuthLog(user.id, "vpn_detected", `IP:${ipHash}`);
+      throw new Error("VPN検知");
+    }
+
+    /* --- sub account --- */
+    const owner = await findUserByIPorUA(ipHash, uaHash);
+    if (owner && owner !== user.id) {
+      await insertAuthLog(
+        user.id,
+        "sub_account_blocked",
+        `IP:${ipHash} UA:${uaHash}`
+      );
+      throw new Error("サブアカウント検知");
+    }
+
+    /* --- DB --- */
+    await upsertUserAuth(
+      user.id,
+      user.username,
+      ipHash,
+      uaHash
+    );
+    await insertAuthLog(user.id, "auth_success", `IP:${ipHash}`);
+
+    /* --- Discord role --- */
+    const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+    const member = await guild.members.fetch(user.id);
+    if (!member.roles.cache.has(DISCORD_ROLE_ID)) {
+      await member.roles.add(DISCORD_ROLE_ID).catch(() => {});
+    }
+
+    /* --- notify --- */
+    try {
+      const ch = await guild.channels.fetch(DISCORD_CHAT_CHANNEL_ID);
+      if (ch?.isTextBased()) {
+        ch.send(`🎉 ようこそ <@${user.id}>！`);
+      }
+    } catch {}
+
+    try {
+      const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+      if (mod?.isTextBased()) {
+        mod.send(
+          `🛡 認証成功: <@${user.id}> IP:${ipHash.slice(0, 8)} UA:${uaHash.slice(0, 8)}`
+        );
+      }
+    } catch {}
+
+    res.send(`<h1>認証完了 🎉 ${user.username} さん</h1>`);
+  } catch (e) {
+    res.status(403).send(`<h1>認証失敗</h1><p>${e.message}</p>`);
+  }
 }
 
 function parseDuration(str) {
@@ -448,10 +534,10 @@ client.on('interactionCreate', async interaction => {
   if (client.shard && client.shard.ids[0] !== 0) return;
     const adminPermissionLevelRequired = 8;
     const userPermissionLevel = interaction.member?.permissions?.bitfield ?? 0;
-  if (!interaction.isChatInputCommand()) return;
+  if (interaction.isChatInputCommand()) {
   console.log("🔥 command:", interaction.commandName, "sub:", interaction.options.getSubcommand(false));
   const { commandName } = interaction;
-  const { sub } = interaction.options.getSubcommand;
+  const sub = interaction.options.getSubcommand(false);
 
   if (commandName === 'ping') {
 
@@ -610,6 +696,11 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'msgpin') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '権限がありません', ephemeral: true })
+        return;
+      }
+
   await interaction.deferReply({ ephemeral: true });
   const msg = interaction.options.getString('msg');
   const channelId = interaction.channel.id;
@@ -627,6 +718,11 @@ client.on('interactionCreate', async interaction => {
 }
 
     if (commandName === 'unpin') {
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '権限がありません', ephemeral: true })
+        return;
+      }
+
       const channelId = interaction.channel.id;
       const existing = await getPinnedByChannel(channelId);
       if (!existing) return interaction.reply({ content: '❌ このチャンネルには固定メッセージがありません', flags: MessageFlags.Ephemeral});
@@ -642,7 +738,7 @@ client.on('interactionCreate', async interaction => {
   if (commandName === 'timeout') {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
       await interaction.reply({ content: '権限がありません', ephemeral: true })
-      return
+      return;
     }
 
     const user = interaction.options.getUser('user')
@@ -890,6 +986,12 @@ client.on('interactionCreate', async interaction => {
 
     // /modal
     if (interaction.commandName === "modal") {
+      await interaction.deferReply();
+        if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
+          await interaction.editReply({ content: '権限がありません', ephemeral: true })
+          return;
+        }
+
       const id = interaction.options.getString("id");
 
       const fields = [];
@@ -918,11 +1020,17 @@ client.on('interactionCreate', async interaction => {
           .setStyle(ButtonStyle.Primary)
       );
 
-      return interaction.reply({ embeds: [embed], components: [row] });
+      interaction.editReply({ embeds: [embed], components: [row] });
+      return;
     }
 
     // /modalview
     if (interaction.commandName === "modalview") {
+      await interaction.deferReply();
+      if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
+        await interaction.editReply({ content: '権限がありません', ephemeral: true })
+        return;
+      }
       const id = interaction.options.getString("id");
       const csv = interaction.options.getBoolean("csv");
 
@@ -945,7 +1053,8 @@ client.on('interactionCreate', async interaction => {
           { name: `${id}.csv` }
         );
 
-        return interaction.reply({ files: [file] });
+        interaction.editReply({ files: [file] });
+        return;
       }
 
       return sendPage(interaction, modal, responses, 0);
@@ -1112,7 +1221,7 @@ try{
     // 追加: ここで errorReporter に投げても良い
   }
 if (commandName === "createaccount") {
-    if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
         return interaction.reply({
             content: "🚫 このコマンドは管理者専用だよ〜！",
             flags: MessageFlags.Ephemeral
@@ -1146,7 +1255,7 @@ if (commandName === "createaccount") {
     // deleteaccount
     // -----------------------------------
     if (commandName === "deleteaccount") {
-        if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ content: "🚫 管理者じゃないとダメだよ！", flags: MessageFlags.Ephemeral });
         }
 
@@ -1169,7 +1278,7 @@ if (commandName === "createaccount") {
     // transferaccount
     // -----------------------------------
     if (commandName === "transferaccount") {
-        if (interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
             return interaction.reply({ content: "🚫 権限足りないよ！", flags: MessageFlags.Ephemeral });
         }
 
@@ -1306,7 +1415,7 @@ if (commandName === "myxp") {
       }
     }
   }
-
+}
   // ---------- Button ----------
   if (interaction.isButton()) {
     const [type, id, page] = interaction.customId.split(":");
