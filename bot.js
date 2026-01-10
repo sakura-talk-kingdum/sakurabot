@@ -65,6 +65,14 @@ const AI_CHANNEL_ID = "1450782867335549031";
 const COOLDOWN = 3 * 1000; // 3秒
 const rateLimit = new Map();
 
+const CHANNEL_COOLDOWN_MS = 60 * 1000; // 60秒
+const ALLOWED_CHANNEL_IDS = [
+  "123456789012345678", // #imihubun
+  "987654321098765432"
+];
+
+const channelCooldowns = new Map();
+
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -933,23 +941,48 @@ client.on('interactionCreate', async interaction => {
 
   // 環境変数がさわれないため直書き。飼育員ロール。by imme
   if (commandName === 'imihubun') {
-    // ロールチェック
+  await interaction.deferReply();
     if (!interaction.member.roles.cache.has(shiikurole)) {
-      await interaction.reply({
+      await interaction.editReply({
         content: '❌ このコマンドを使用する権限がありません'
       });
       return;
     }
-  
-    const channel = interaction.options.getChannel('channel');
-  
-    // テキストチャンネル確認
+
+  const channel = interaction.options.getChannel('channel');
+
     if (!channel.isTextBased()) {
-      await interaction.reply({
+      await interaction.editReply({
         content: '❌ テキストチャンネルを指定してください'
       });
       return;
     }
+
+
+  /* ===== チャンネル制限 ===== */
+  if (!ALLOWED_CHANNEL_IDS.includes(channel)) {
+    return interaction.editReply({
+      content: "❌ このコマンドは指定チャンネルでのみ使用できます。",
+      ephemeral: true
+    });
+  }
+
+  /* ===== チャンネル単位クールダウン ===== */
+  const now = Date.now();
+  const lastUsed = channelCooldowns.get(channel) ?? 0;
+
+  const remaining = CHANNEL_COOLDOWN_MS - (now - lastUsed);
+  if (remaining > 0) {
+    return interaction.reply({
+      content: `⏳ このチャンネルではあと **${Math.ceil(remaining / 1000)}秒** 待ってね`,
+      ephemeral: true
+    });
+  }
+
+  // クールダウン更新
+  channelCooldowns.set(channel, now);
+  
+    // テキストチャンネル確認
 
     const footer = "\n-# by 意味不文ジェネレーター";
     const main_text = Math.random() > 0.5
@@ -976,7 +1009,7 @@ client.on('interactionCreate', async interaction => {
    
     await channel.send(main_text + footer);
   
-    await interaction.reply({content: `✅ <#${channel.id}> に送信しました`});
+    await interaction.editReply({content: `✅ <#${channel.id}> に送信しました`});
   }
 
   if (!interaction.replied && !interaction.deferred) {
