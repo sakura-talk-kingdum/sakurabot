@@ -360,53 +360,55 @@ new SlashCommandBuilder()
         .setDescription('送信先チャンネル')
         .setRequired(true),
 
-    new SlashCommandBuilder()
-      .setName("modal")
-      .setDescription("モーダル付きEmbedを作成")
-      .addStringOption(option => option.setName("title").setRequired(true))
-      .addStringOption(option => option.setName("description").setRequired(true))
-      .addStringOption(option => option.setName("modaltitle").setRequired(true))
-      .addStringOption(option => option.setName("id").setRequired(true))
-      .addStringOption(option => option.setName("name1").setRequired(true))
-      .addStringOption(option =>
-        option.setName("type1").setRequired(true)
-          .addChoices(
-            { name: "短文", value: "SHORT" },
-            { name: "長文", value: "PARA" }
-          ) 
-        ),
-      .addStringOption(option => option.setName("name2").setRequired(false))
-      .addStringOption(option =>
-        option.setName("type2").setRequired(false)
-          .addChoices(
-            { name: "短文", value: "SHORT" },
-            { name: "長文", value: "PARA" }
-          )
-        ),
-      .addStringOption(option => option.setName("name3").setRequired(false))
-      .addStringOption(option =>
-        option.setName("type3").setRequired(false)
-          .addChoices(
-            { name: "短文", value: "SHORT" },
-            { name: "長文", value: "PARA" }
-          )
-        ), 
-      .addStringOption(option => option.setName("name4").setRequired(false))
-      .addStringOption(option =>
-        option.setName("type4").setRequired(false)
-          .addChoices(
-            { name: "短文", value: "SHORT" },
-            { name: "長文", value: "PARA" }
-          )
-        ),
-      .addStringOption(option => option.setName("name5").setRequired(false))
-      .addStringOption(option =>
-        option.setName("type5").setRequired(false)
-          .addChoices(
-            { name: "短文", value: "SHORT" },
-            { name: "長文", value: "PARA" }
-          ),
-        ),
+const { SlashCommandBuilder } = require('discord.js');
+
+const data = new SlashCommandBuilder()
+  .setName("modal")
+  .setDescription("モーダル版投票を作成")
+  .addStringOption(option => option.setName("title").setDescription("タイトル").setRequired(true))
+  .addStringOption(option => option.setName("description").setDescription("説明文").setRequired(true))
+  .addStringOption(option => option.setName("modaltitle").setDescription("モーダルのタイトル").setRequired(true))
+  .addStringOption(option => option.setName("id").setDescription("カスタムID").setRequired(true))
+  .addStringOption(option => option.setName("name1").setDescription("項目1の名前").setRequired(true))
+  .addStringOption(option =>
+    option.setName("type1").setDescription("項目1の形式").setRequired(true)
+      .addChoices(
+        { name: "短文", value: "SHORT" },
+        { name: "長文", value: "PARA" }
+      )
+  ) 
+  .addStringOption(option => option.setName("name2").setDescription("項目2の名前").setRequired(false))
+  .addStringOption(option =>
+    option.setName("type2").setDescription("項目2の形式").setRequired(false)
+      .addChoices(
+        { name: "短文", value: "SHORT" },
+        { name: "長文", value: "PARA" }
+      )
+  ) 
+  .addStringOption(option => option.setName("name3").setDescription("項目3の名前").setRequired(false))
+  .addStringOption(option =>
+    option.setName("type3").setDescription("項目3の形式").setRequired(false)
+      .addChoices(
+        { name: "短文", value: "SHORT" },
+        { name: "長文", value: "PARA" }
+      )
+  ) 
+  .addStringOption(option => option.setName("name4").setDescription("項目4の名前").setRequired(false))
+  .addStringOption(option =>
+    option.setName("type4").setDescription("項目4の形式").setRequired(false)
+      .addChoices(
+        { name: "短文", value: "SHORT" },
+        { name: "長文", value: "PARA" }
+      )
+  ) 
+  .addStringOption(option => option.setName("name5").setDescription("項目5の名前").setRequired(false))
+  .addStringOption(option =>
+    option.setName("type5").setDescription("項目5の形式").setRequired(false)
+      .addChoices(
+        { name: "短文", value: "SHORT" },
+        { name: "長文", value: "PARA" }
+      ) 
+  );
 
   // ---------- /modalview ----------
   new SlashCommandBuilder()
