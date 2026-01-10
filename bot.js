@@ -1307,8 +1307,6 @@ if (commandName === "myxp") {
     }
   }
 
-});    
-
   // ---------- Button ----------
   if (interaction.isButton()) {
     const [type, id, page] = interaction.customId.split(":");
@@ -1337,7 +1335,7 @@ if (commandName === "myxp") {
         );
       });
 
-      interaction.showModal(modalUI);
+      await interaction.showModal(modalUI);
       return;
     }
 
@@ -1349,7 +1347,8 @@ if (commandName === "myxp") {
       const { data: responses } = await supabase
         .from("modal_responses").select("*").eq("modal_id", id);
 
-      return sendPage(interaction, modal, responses, Number(page));
+      sendPage(interaction, modal, responses, Number(page));
+      return;
     }
   }
 
@@ -1372,10 +1371,11 @@ if (commandName === "myxp") {
       values
     });
 
-    return interaction.reply({
+    await interaction.reply({
       content: "送信完了！",
       ephemeral: true
     });
+    return;
   }
 
 const PER_PAGE = 20;
@@ -1419,7 +1419,7 @@ async function sendPage(interaction, modal, responses, page) {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 }
-
+});
       
 /* 
   ガチャのデータ読み込み
