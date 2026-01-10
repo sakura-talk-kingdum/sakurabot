@@ -14,7 +14,11 @@ import {
   ButtonStyle,
   MessageFlags,
   PermissionsBitField,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  Collection
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -219,14 +223,14 @@ const commands = [
   new SlashCommandBuilder()
     .setName('report')
     .setDescription('ユーザーを通報します')
-    .addStringOption(opt => opt.setName('userid').setDescription('通報するユーザーID').setRequired(true))
-    .addStringOption(opt => opt.setName('reason').setDescription('通報理由').setRequired(true))
-    .addAttachmentOption(opt => opt.setName('file').setDescription('証拠画像（任意）')),
+    .addStringOption(option => option.setName('userid').setDescription('通報するユーザーID').setRequired(true))
+    .addStringOption(option => option.setName('reason').setDescription('通報理由').setRequired(true))
+    .addAttachmentOption(option => option.setName('file').setDescription('証拠画像（任意）')),
 
   new SlashCommandBuilder()
     .setName('msgpin')
     .setDescription('チャンネルにメッセージを固定します')
-    .addStringOption(opt => opt.setName('msg').setDescription('固定する内容').setRequired(true))
+    .addStringOption(option => option.setName('msg').setDescription('固定する内容').setRequired(true))
     .setDefaultMemberPermissions(PermissionsBitField.Flags.Administrator),
 
   new SlashCommandBuilder()
@@ -265,7 +269,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName('play')
     .setDescription('🎶 音楽を再生します')
-    .addStringOption(opt => opt.setName('url').setDescription('YouTubeのURL').setRequired(true)),
+    .addStringOption(option => option.setName('url').setDescription('YouTubeのURL').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('skip')
@@ -354,7 +358,63 @@ new SlashCommandBuilder()
       .addChannelOption(option =>
           option.setName('channel')
         .setDescription('送信先チャンネル')
-        .setRequired(true)
+        .setRequired(true),
+
+    new SlashCommandBuilder()
+      .setName("modal")
+      .setDescription("モーダル付きEmbedを作成")
+      .addStringOption(option => option.setName("title").setRequired(true))
+      .addStringOption(option => option.setName("description").setRequired(true))
+      .addStringOption(option => option.setName("modaltitle").setRequired(true))
+      .addStringOption(option => option.setName("id").setRequired(true))
+      .addStringOption(option => option.setName("name1").setRequired(true))
+      .addStringOption(option =>
+        option.setName("type1").setRequired(true)
+          .addChoices(
+            { name: "短文", value: "SHORT" },
+            { name: "長文", value: "PARA" }
+          ) 
+        ),
+      .addStringOption(option => option.setName("name2").setRequired(false))
+      .addStringOption(option =>
+        option.setName("type2").setRequired(false)
+          .addChoices(
+            { name: "短文", value: "SHORT" },
+            { name: "長文", value: "PARA" }
+          )
+        ),
+      .addStringOption(option => option.setName("name3").setRequired(false))
+      .addStringOption(option =>
+        option.setName("type3").setRequired(false)
+          .addChoices(
+            { name: "短文", value: "SHORT" },
+            { name: "長文", value: "PARA" }
+          )
+        ), 
+      .addStringOption(option => option.setName("name4").setRequired(false))
+      .addStringOption(option =>
+        option.setName("type4").setRequired(false)
+          .addChoices(
+            { name: "短文", value: "SHORT" },
+            { name: "長文", value: "PARA" }
+          )
+        ),
+      .addStringOption(option => option.setName("name5").setRequired(false))
+      .addStringOption(option =>
+        option.setName("type5").setRequired(false)
+          .addChoices(
+            { name: "短文", value: "SHORT" },
+            { name: "長文", value: "PARA" }
+          ),
+        ),
+
+  // ---------- /modalview ----------
+  new SlashCommandBuilder()
+    .setName("modalview")
+    .setDescription("モーダル集計を見る / CSV出力")
+    .addStringOption(option => option.setName("id").setRequired(true))
+    .addBooleanOption(option => option.setName("csv"))
+
     )
     ].map(c => c.toJSON());
 
@@ -828,7 +888,70 @@ client.on('interactionCreate', async interaction => {
   interaction.reply({ content: '❌ エラーが発生しました', flags: 64 })
   .catch(console.error);
 }
-    
+
+    // /modal
+    if (interaction.commandName === "modal") {
+      const id = interaction.options.getString("id");
+
+      const fields = [];
+      for (let i = 1; i <= 5; i++) {
+        const name = interaction.options.getString(`name${i}`);
+        const type = interaction.options.getString(`type${i}`);
+        if (name && type) fields.push({ name, type });
+      }
+
+      await supabase.from("modals").insert({
+        id,
+        embed_title: interaction.options.getString("title"),
+        embed_description: interaction.options.getString("description"),
+        modal_title: interaction.options.getString("modaltitle"),
+        fields
+      });
+
+      const embed = new EmbedBuilder()
+        .setTitle(interaction.options.getString("title"))
+        .setDescription(interaction.options.getString("description"));
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`modal_open:${id}`)
+          .setLabel("回答する")
+          .setStyle(ButtonStyle.Primary)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row] });
+    }
+
+    // /modalview
+    if (interaction.commandName === "modalview") {
+      const id = interaction.options.getString("id");
+      const csv = interaction.options.getBoolean("csv");
+
+      const { data: modal } = await supabase
+        .from("modals").select("*").eq("id", id).single();
+
+      const { data: responses } = await supabase
+        .from("modal_responses").select("*").eq("modal_id", id);
+
+      if (csv) {
+        const headers = ["username", ...modal.fields.map(f => f.name)];
+        const rows = responses.map(r =>
+          [r.username, ...modal.fields.map(f => r.values[f.name] ?? "")]
+            .map(v => `"${v}"`).join(",")
+        );
+
+        const csvData = [headers.join(","), ...rows].join("\n");
+        const file = new AttachmentBuilder(
+          Buffer.from(csvData),
+          { name: `${id}.csv` }
+        );
+
+        return interaction.reply({ files: [file] });
+      }
+
+      return sendPage(interaction, modal, responses, 0);
+    }
+
   // -----------------------
   // /account info
   // -----------------------
@@ -1185,7 +1308,117 @@ if (commandName === "myxp") {
     }
   }
 
-});         
+});    
+
+  // ---------- Button ----------
+  if (interaction.isButton()) {
+    const [type, id, page] = interaction.customId.split(":");
+
+    // モーダル表示
+    if (type === "modal_open") {
+      const { data: modal } = await supabase
+        .from("modals").select("*").eq("id", id).single();
+
+      const modalUI = new ModalBuilder()
+        .setCustomId(`modal_submit:${id}`)
+        .setTitle(modal.modal_title);
+
+      modal.fields.forEach((f, i) => {
+        modalUI.addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId(`field_${i}`)
+              .setLabel(f.name)
+              .setStyle(
+                f.type === "SHORT"
+                  ? TextInputStyle.Short
+                  : TextInputStyle.Paragraph
+              )
+          )
+        );
+      });
+
+      return interaction.showModal(modalUI);
+    }
+
+    // ページング
+    if (type === "modal_page") {
+      const { data: modal } = await supabase
+        .from("modals").select("*").eq("id", id).single();
+
+      const { data: responses } = await supabase
+        .from("modal_responses").select("*").eq("modal_id", id);
+
+      return sendPage(interaction, modal, responses, Number(page));
+    }
+  }
+
+  // ---------- Modal Submit ----------
+  if (interaction.isModalSubmit()) {
+    const id = interaction.customId.split(":")[1];
+
+    const { data: modal } = await supabase
+      .from("modals").select("*").eq("id", id).single();
+
+    const values = {};
+    modal.fields.forEach((f, i) => {
+      values[f.name] = interaction.fields.getTextInputValue(`field_${i}`);
+    });
+
+    await supabase.from("modal_responses").insert({
+      modal_id: id,
+      user_id: interaction.user.id,
+      username: interaction.user.username,
+      values
+    });
+
+    return interaction.reply({
+      content: "送信完了！",
+      ephemeral: true
+    });
+  }
+
+const PER_PAGE = 20;
+
+async function sendPage(interaction, modal, responses, page) {
+  const start = page * PER_PAGE;
+  const slice = responses.slice(start, start + PER_PAGE);
+
+  const embed = new EmbedBuilder()
+    .setTitle(modal.modal_title)
+    .setDescription(
+      ["ユーザー名", ...modal.fields.map(f => f.name)].join(" | ")
+    );
+
+  slice.forEach(r => {
+    embed.addFields({
+      name: "\u200b",
+      value: [
+        r.username,
+        ...modal.fields.map(f => r.values[f.name] ?? "-")
+      ].join(" | ")
+    });
+  });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`modal_page:${modal.id}:${page - 1}`)
+      .setLabel("◀")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === 0),
+    new ButtonBuilder()
+      .setCustomId(`modal_page:${modal.id}:${page + 1}`)
+      .setLabel("▶")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(start + PER_PAGE >= responses.length)
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    return interaction.update({ embeds: [embed], components: [row] });
+  } else {
+    return interaction.reply({ embeds: [embed], components: [row] });
+  }
+}
 
       
 /* 
@@ -1565,9 +1798,10 @@ client.on("messageCreate", async message => {
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
 cron.schedule(
-  "0 5 * * *",
+  "0 0 5 * * *", // 秒まで指定して明示的に
   async () => {
-  if (client.shard && client.shard.ids[0] !== 0) return;
+    // シャーディング対応：最初のシャード以外は実行しない
+    if (client.shard && client.shard.ids[0] !== 0) return;
 
     try {
       console.log("📢 Sending daily odai…");
@@ -1580,47 +1814,49 @@ cron.schedule(
 
       if (fetchError) throw fetchError;
 
-      // 2. もし未使用がなければリセット
+      // 2. 未使用がなければリセット
       if (!unused || unused.length === 0) {
         console.log("🔄 Resetting all odai to unused…");
-        // 全件のusedをfalseに戻す (idが0より大きいものを対象にする例)
-        await supabase.from("odai").update({ used: false }).gt("id", 0);
+        const { error: resetError } = await supabase
+          .from("odai")
+          .update({ used: false })
+          .gt("id", 0);
+        
+        if (resetError) throw resetError;
 
-        // リセット後、改めて全件取得
         const { data: allOdai } = await supabase.from("odai").select("*");
         unused = allOdai;
       }
 
-      // 3. ランダムに一つ選択
+      // 3. ランダムに選択
       const pick = unused[Math.floor(Math.random() * unused.length)];
       if (!pick) return console.log("⚠️ No odai found.");
-      const channel = client.channels.cache.get(DISCORD_CHAT_CHANNEL_ID);
-        channel.send({
+
+      // 4. 送信
+      const channel = await client.channels.fetch(DISCORD_CHAT_CHANNEL_ID);
+      if (channel) {
+        await channel.send({
           embeds: [
             {
               title: "今日のお題",
               description: pick.text,
               color: 0x00bfff,
-              // メンションを有効にしたい場合は description に含めるのがおすすめ
-              footer: { text: `ID: ${pick.id} | 次回のリセットまで残り ${unused.length - 1} 件` },
+              footer: { text: `ID: ${pick.id} | 残り ${unused.length - 1} 件` },
               timestamp: new Date().toISOString(),
             },
           ],
         });
         console.log("✨ Sent:", pick.text);
+      }
+
       // 5. 使用済みに更新
-      await supabase
-        .from("odai")
-        .update({ used: true })
-        .eq("id", pick.id);
+      await supabase.from("odai").update({ used: true }).eq("id", pick.id);
 
     } catch (err) {
       console.error("❌ Cron error:", err);
     }
   },
-  {
-    timezone: "Asia/Tokyo",
-  }
+  { timezone: "Asia/Tokyo" }
 );
 
 // ready
