@@ -1337,7 +1337,8 @@ if (commandName === "myxp") {
         );
       });
 
-      return interaction.showModal(modalUI);
+      interaction.showModal(modalUI);
+      return;
     }
 
     // ページング
