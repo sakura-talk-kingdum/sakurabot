@@ -360,9 +360,7 @@ new SlashCommandBuilder()
         .setDescription('送信先チャンネル')
         .setRequired(true),
 
-const { SlashCommandBuilder } = require('discord.js');
-
-const data = new SlashCommandBuilder()
+new SlashCommandBuilder()
   .setName("modal")
   .setDescription("モーダル版投票を作成")
   .addStringOption(option => option.setName("title").setDescription("タイトル").setRequired(true))
