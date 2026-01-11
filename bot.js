@@ -777,7 +777,7 @@ client.on('interactionCreate', async interaction => {
   
     // テキストチャンネル確認
 
-    const footer = "\n-# -# By [意味不文ジェネレーター](<https://povo-43.github.io/imihubun>)";
+    const footer = "\n-# By [意味不文ジェネレーター](<https://povo-43.github.io/imihubun>)";
     const main_text = Math.random() > 0.5
       ? (
           wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
