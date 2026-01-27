@@ -142,7 +142,7 @@ async function checkVPN(ip) {
       `https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`,
       { timeout: 5000 }
     );
-    if (!res.ok) return true;
+    if (res.ok) return true;
 
     const data = await res.json();
     const s = data?.security;
