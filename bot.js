@@ -97,11 +97,7 @@ const indicators = "abcdefghijklmnopqrstuvwxyz".split("").map(letter => ({
 const wait = ms => new Promise(res => setTimeout(res, ms));
 
 // 意味不明単語ジェネレーターのワードリストを読み込む。/imihubunの実装。by imme
-let wordData = null;
-(async () => {
-  const res = await fetch('https://povo-43.github.io/imihubun/words.json');
-  wordData = await res.json();
-})();
+
 
 function sha256(v) {
   return crypto.createHash("sha256").update(v).digest("hex");
