@@ -353,18 +353,29 @@ export async function handleOAuthCallback(req, res) {
   }
 }
 
-// --- commands registration ---
-const rest = new REST({ version: '10' }).setToken(DISCORD_BOT_TOKEN);
+const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
 (async () => {
   try {
-    console.log('スラッシュコマンド登録中...');
-    await rest.put(Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID), { body: commands });
-    console.log('✅ コマンド登録完了');
+    console.log("スラッシュコマンド登録中...");
+
+    const body = commands.map(cmd =>
+      typeof cmd.toJSON === "function" ? cmd.toJSON() : cmd
+    );
+
+    await rest.put(
+      Routes.applicationGuildCommands(
+        DISCORD_CLIENT_ID,
+        DISCORD_GUILD_ID
+      ),
+      { body }
+    );
+
+    console.log("✅ コマンド登録完了");
   } catch (err) {
-    console.error('❌ コマンド登録失敗:', err);
+    console.error("❌ コマンド登録失敗:", err);
   }
-});
+})();
 
 // pinned table check note: with Supabase you'd usually create tables via migration
 async function ensurePinnedTableExists() {
@@ -1323,6 +1334,7 @@ async function sendPage(interaction, modal, responses, page) {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 }
+
 }
 });
       
