@@ -17,27 +17,44 @@ export const supabase = createClient(
 /* =====================
    USERS (AUTH + PROFILE)
 ===================== */
+
+/**
+ * 認証成功時にユーザー情報を保存 / 更新
+ * ※ IP・UAは「最新のみ」
+ */
 export async function upsertUserAuth(
   userId,
   username,
   ipHash,
   uaHash
 ) {
-  const { error } = await supabase.from("users").upsert({
-    user_id: userId,
-    username,
-    ip_hash: ipHash,
-    ua_hash: uaHash,
-    last_seen: new Date().toISOString()
-  });
+  const { error } = await supabase
+    .from("users")
+    .upsert(
+      {
+        user_id: userId,
+        username,
+        ip_hash: ipHash,
+        ua_hash: uaHash,
+        last_seen: new Date().toISOString()
+      },
+      { onConflict: "user_id" }
+    );
+
   if (error) throw error;
 }
 
-export async function findUserByIPorUA(ipHash, uaHash) {
+/**
+ * サブ垢判定用
+ * IP + UA が両方一致したユーザーのみ返す
+ * （誤爆防止）
+ */
+export async function findUserByIPandUA(ipHash, uaHash) {
   const { data, error } = await supabase
     .from("users")
     .select("user_id")
-    .or(`ip_hash.eq.${ipHash},ua_hash.eq.${uaHash}`)
+    .eq("ip_hash", ipHash)
+    .eq("ua_hash", uaHash)
     .limit(1)
     .maybeSingle();
 
@@ -46,20 +63,38 @@ export async function findUserByIPorUA(ipHash, uaHash) {
 }
 
 /* =====================
-   AUTH LOGS（唯一）
+   AUTH LOGS
 ===================== */
-export async function insertAuthLog(userId, type, detail) {
-  const { error } = await supabase.from("auth_logs").insert({
-    user_id: userId,
-    type,
-    detail
-  });
+
+/**
+ * 認証ログ
+ * type 例:
+ *  - auth_success
+ *  - vpn_detected
+ *  - rate_limited
+ *  - sub_account_blocked
+ */
+export async function insertAuthLog(
+  userId,
+  type,
+  detail
+) {
+  const { error } = await supabase
+    .from("auth_logs")
+    .insert({
+      user_id: userId,
+      type,
+      detail,
+      created_at: new Date().toISOString()
+    });
+
   if (error) throw error;
 }
 
 /* =====================
    PINNED MESSAGES
 ===================== */
+
 export async function getPinnedByChannel(channel_id) {
   const { data, error } = await supabase
     .from("pinned_messages")
@@ -68,7 +103,7 @@ export async function getPinnedByChannel(channel_id) {
     .maybeSingle();
 
   if (error) throw error;
-  return data || null;
+  return data ?? null;
 }
 
 export async function insertPinned(
@@ -77,12 +112,15 @@ export async function insertPinned(
   content,
   author_name
 ) {
-  const { error } = await supabase.from("pinned_messages").insert({
-    channel_id,
-    message_id,
-    content,
-    author_name
-  });
+  const { error } = await supabase
+    .from("pinned_messages")
+    .insert({
+      channel_id,
+      message_id,
+      content,
+      author_name
+    });
+
   if (error) throw error;
 }
 
@@ -104,6 +142,7 @@ export async function upsertPinned(
       },
       { onConflict: "channel_id" }
     );
+
   if (error) throw error;
 }
 

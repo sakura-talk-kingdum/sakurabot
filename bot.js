@@ -36,7 +36,15 @@ import pidusage from 'pidusage';
 import cron from "node-cron";
 import { createUserAccount, deleteUserAccount, transferUserAccount,fetchUserAccount, addUserExperience, calculateUserLevel } from "./account.js";
 import { startRecord, stopRecord } from "./record.js";
-import { supabase, upsertUser, insertUserIpIfNotExists, getUserIpOwner, insertAuthLog, getPinnedByChannel, upsertPinned, deletePinned, upsertUserAuth, findUserByIPorUA } from './db.js';
+import {
+  supabase,
+  upsertUserAuth,
+  findUserByIPandUA,
+  insertAuthLog,
+  getPinnedByChannel,
+  upsertPinned,
+  deletePinned
+} from "./db.js";
 import { commands } from "./lib/command/command.js";
 
 const width = 400;
@@ -89,67 +97,33 @@ export const client = new Client({
   }
 });
 
-const indicators = "abcdefghijklmnopqrstuvwxyz".split("").map(letter => ({
-  key: letter,
-  emoji: `🇦`.codePointAt(0) + (letter.charCodeAt(0) - 97)
-}));
+function parseDuration(str) {
+  // max, w を正規表現に追加。特定の日にち(2025-12-31等)にもマッチするよう修正
+  const regex = /(\d{4}-\d{2}-\d{2})|(\d+)\s*(max|w|d|h|m|s)/gi
+  let ms = 0
 
-const wait = ms => new Promise(res => setTimeout(res, ms));
+  for (const m of str.matchAll(regex)) {
+    // 日付指定（YYYY-MM-DD）の場合
+    if (m[1]) {
+      const target = new Date(m[1]).setHours(0, 0, 0, 0)
+      const diff = target - Date.now()
+      if (diff > 0) ms += diff
+      continue
+    }
 
-// 意味不明単語ジェネレーターのワードリストを読み込む。/imihubunの実装。by imme
-
-
-function sha256(v) {
-  return crypto.createHash("sha256").update(v).digest("hex");
-}
-
-function normalizeIP(ip) {
-  if (!ip) return null;
-  if (ip.startsWith("::ffff:")) return ip.replace("::ffff:", "");
-  return ip;
-}
-
-function isGlobalIP(ip) {
-  if (!ip) return false;
-  return !(
-    ip.startsWith("10.") ||
-    ip.startsWith("192.168.") ||
-    ip.startsWith("172.16.") ||
-    ip === "127.0.0.1" ||
-    ip === "::1" ||
-    ip.startsWith("fc") ||
-    ip.startsWith("fe80")
-  );
-}
-
-function extractGlobalIP(ipString) {
-  if (!ipString) return null;
-  const ips = ipString.split(",").map(i => normalizeIP(i.trim()));
-  for (const ip of ips) {
-    if (isGlobalIP(ip)) return ip;
+    const v = Number(m[2])
+    const u = m[3].toLowerCase()
+    
+    if (u === 'max') ms += 2419200000 // 28日
+    else if (u === 'w') ms += v * 604800000
+    else if (u === 'd') ms += v * 86400000
+    else if (u === 'h') ms += v * 3600000
+    else if (u === 'm') ms += v * 60000
+    else if (u === 's') ms += v * 1000
   }
-  return null;
-}
 
-/* =====================
-   VPN CHECK
-===================== */
-async function checkVPN(ip) {
-  if (!isGlobalIP(ip)) return true;
-
-  try {
-    const res = await fetch(
-      `https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`,
-      { timeout: 5000 }
-    );
-    if (res.ok) return true;
-
-    const data = await res.json();
-    const s = data?.security;
-    return Boolean(s?.vpn || s?.proxy || s?.tor || s?.relay);
-  } catch {
-    return true;
-  }
+  // Discordの仕様上、最大28日を超えないように制限
+  return Math.min(ms, 2419200000)
 }
 
 /* =====================
@@ -171,27 +145,111 @@ function checkRateLimit(ipHash) {
 }
 
 /* =====================
+   UTIL
+===================== */
+function sha256(v) {
+  return crypto.createHash("sha256").update(v).digest("hex");
+}
+
+function normalizeIP(ip) {
+  if (!ip) return null;
+  if (ip.startsWith("::ffff:")) return ip.replace("::ffff:", "");
+  return ip;
+}
+
+function isGlobalIP(ip) {
+  if (!ip) return false;
+
+  // IPv4 private
+  if (
+    ip.startsWith("10.") ||
+    ip.startsWith("192.168.") ||
+    ip.startsWith("172.16.") ||
+    ip === "127.0.0.1"
+  ) return false;
+
+  // IPv6 local
+  if (
+    ip === "::1" ||
+    ip.startsWith("fe80") ||
+    ip.startsWith("fc") ||
+    ip.startsWith("fd")
+  ) return false;
+
+  return true;
+}
+
+function extractGlobalIP(ipString) {
+  if (!ipString) return null;
+
+  const ips = ipString
+    .split(",")
+    .map(i => normalizeIP(i.trim()))
+    .filter(Boolean);
+
+  for (const ip of ips) {
+    if (isGlobalIP(ip)) return ip;
+  }
+  return null;
+}
+
+/* =====================
+   VPN CHECK
+===================== */
+async function checkVPN(ip) {
+  if (!isGlobalIP(ip)) return false;
+
+  try {
+    const res = await fetch(
+      `https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`,
+      { timeout: 5000 }
+    );
+
+    // API死んだら安全側
+    if (!res.ok) return true;
+
+    const data = await res.json();
+    const s = data?.security;
+
+    return Boolean(
+      s?.vpn ||
+      s?.proxy ||
+      s?.tor ||
+      s?.relay
+    );
+  } catch {
+    return true;
+  }
+}
+
+/* =====================
    OAUTH CALLBACK
 ===================== */
 export async function handleOAuthCallback(req, res) {
   try {
     const { code } = req.query;
+
+    const forwarded = req.headers["x-forwarded-for"];
+    const rawIP = Array.isArray(forwarded)
+      ? forwarded[0]
+      : forwarded;
+
     const ip =
-      req.headers["x-forwarded-for"] ||
-      req.socket.remoteAddress;
+      extractGlobalIP(rawIP) ||
+      normalizeIP(req.socket.remoteAddress);
+
     const ua = req.headers["user-agent"] || "unknown";
 
-    if (!code || !ip) throw new Error("認証情報が不正です");
+    if (!code || !ip) throw new Error("認証情報が不正です。もう一度Discord上でボタンを押し認証ページへ飛んでください。");
+    if (!isGlobalIP(ip)) throw new Error("有効なグローバルIPが取得できません");
 
-    const globalIP = extractGlobalIP(ip);
-    if (!globalIP) throw new Error("有効なIPが取得できません");
-
-    const ipHash = sha256(globalIP);
+    const ipHash = sha256(ip);
     const uaHash = sha256(ua);
 
-    if (!checkRateLimit(ipHash)) {
+    /* --- rate limit (IP + UA) --- */
+    if (!checkRateLimit(`${ipHash}:${uaHash}`)) {
       await insertAuthLog(null, "rate_limited", `IP:${ipHash}`);
-      throw new Error("認証試行が多すぎます");
+      throw new Error("認証試行が多すぎます。しばらく置いてからお試しください");
     }
 
     /* --- token --- */
@@ -216,31 +274,36 @@ export async function handleOAuthCallback(req, res) {
     );
 
     const token = await tokenRes.json();
-    if (!token.access_token) throw new Error("トークン取得失敗");
+    if (!token.access_token) throw new Error("認証コードをdiscordから受け取れませんでした。もう一度お試しください");
 
     /* --- user --- */
     const userRes = await fetch(
       "https://discord.com/api/users/@me",
-      { headers: { Authorization: `Bearer ${token.access_token}` } }
+      {
+        headers: {
+          Authorization: `Bearer ${token.access_token}`
+        }
+      }
     );
+
     const user = await userRes.json();
     if (!user?.id) throw new Error("ユーザー取得失敗");
 
     /* --- VPN --- */
-    if (await checkVPN(globalIP)) {
+    if (await checkVPN(ip)) {
       await insertAuthLog(user.id, "vpn_detected", `IP:${ipHash}`);
-      throw new Error("VPN検知");
+      throw new Error("VPN / Proxy が検知されました。adblockerなどが動いてる場合でも起こりうる場合があります。もう一度Discordの方でボタンを押し認証ページへ飛んでください。");
     }
 
-    /* --- sub account --- */
-    const owner = await findUserByIPorUA(ipHash, uaHash);
+    /* --- sub account (IP + UA 両一致のみ) --- */
+    const owner = await findUserByIPandUA(ipHash, uaHash);
     if (owner && owner !== user.id) {
       await insertAuthLog(
         user.id,
         "sub_account_blocked",
         `IP:${ipHash} UA:${uaHash}`
       );
-      throw new Error("サブアカウント検知");
+      throw new Error("サブアカウントの可能性があります。もし前のアカウントが使えなくなった場合、サブアカウントは別途管理者に報告してください。");
     }
 
     /* --- DB --- */
@@ -250,11 +313,17 @@ export async function handleOAuthCallback(req, res) {
       ipHash,
       uaHash
     );
-    await insertAuthLog(user.id, "auth_success", `IP:${ipHash}`);
+
+    await insertAuthLog(
+      user.id,
+      "auth_success",
+      `IP:${ipHash}`
+    );
 
     /* --- Discord role --- */
     const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
     const member = await guild.members.fetch(user.id);
+
     if (!member.roles.cache.has(DISCORD_ROLE_ID)) {
       await member.roles.add(DISCORD_ROLE_ID).catch(() => {});
     }
@@ -271,32 +340,17 @@ export async function handleOAuthCallback(req, res) {
       const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
       if (mod?.isTextBased()) {
         mod.send(
-          `🛡 認証成功: <@${user.id}> IP:${ipHash.slice(0, 8)} UA:${uaHash.slice(0, 8)}`
+          `🛡 認証成功: <@${user.id}> IP:${ipHash.slice(0,8)} UA:${uaHash.slice(0,8)}`
         );
       }
     } catch {}
 
     res.send(`<h1>認証完了 🎉 ${user.username} さん</h1>`);
   } catch (e) {
-    res.status(403).send(`<h1>認証失敗</h1><p>${e.message}</p>`);
+    res
+      .status(403)
+      .send(`<h1>認証失敗</h1><p>${e.message}</p>`);
   }
-}
-
-function parseDuration(str) {
-  const regex = /(\d+)\s*(d|h|m|s)/gi
-  let ms = 0
-
-  for (const m of str.matchAll(regex)) {
-    const v = Number(m[1])
-    const u = m[2].toLowerCase()
-
-    if (u === 'd') ms += v * 86400000
-    if (u === 'h') ms += v * 3600000
-    if (u === 'm') ms += v * 60000
-    if (u === 's') ms += v * 1000
-  }
-
-  return ms
 }
 
 // --- commands registration ---
