@@ -784,8 +784,90 @@ client.on('interactionCreate', async interaction => {
 
   // 環境変数がさわれないため直書き。飼育員ロール。by imme
   if (commandName === 'imihubun') {
+
+  await interaction.deferReply();
+    if (!interaction.member.roles.cache.has(shiikurole)) {
+      await interaction.editReply({
+        content: '❌ このコマンドを使用する権限がありません'
+      });
+      return;
+    }
+  let wordData = null;
+  (async () => {
+    const res = await fetch('https://povo-43.github.io/imihubun/words.json');
+     wordData = await res.json();
+  })();
+
+  const channel = interaction.options.getChannel('channel');
+
+    if (!channel.isTextBased()) {
+      await interaction.editReply({
+        content: '❌ テキストチャンネルを指定してください'
+      });
+      return;
+    }
+
+
+  /* ===== チャンネル制限 ===== */
+  if (!ALLOWED_CHANNEL_IDS.includes(channel)) {
+    return interaction.editReply({
+      content: "❌ このコマンドは指定チャンネルでのみ使用できます。",
+      ephemeral: true
+    });
+  }
+
+  /* ===== チャンネル単位クールダウン ===== */
+  const now = Date.now();
+  const lastUsed = channelCooldowns.get(channel) ?? 0;
+
+  const remaining = CHANNEL_COOLDOWN_MS - (now - lastUsed);
+  if (remaining > 0) {
+    return interaction.editRreply({
+      content: `⏳ このチャンネルではあと **${Math.ceil(remaining / 1000)}秒** 待ってね`,
+      ephemeral: true
+    });
+  }
+
+  // クールダウン更新
+  channelCooldowns.set(channel, now);
+  
+    // テキストチャンネル確認
+
+    const footer = "\n-# By [意味不文ジェネレーター](<https://povo-43.github.io/imihubun>)";
+    const main_text = Math.random() > 0.5
+      ? (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        ) + ' ' + (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        )
+      : (
+          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
+          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
+          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
+          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
+          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
+        )
+   
+    await channel.send(main_text + footer);
+  
+    await interaction.editReply({content: `✅ <#${channel.id}> に送信しました`});
+  }
+
+  if (!interaction.replied && !interaction.deferred) {
+  interaction.reply({ content: '❌ エラーが発生しました', flags: 64 })
+  .catch(console.error);
+}
+
     // /modal
-    if (interaction.commandName === "modal") {
+    if (commandName === "modal") {
       await interaction.deferReply();
         if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
           await interaction.editReply({ content: '権限がありません', ephemeral: true })
@@ -825,7 +907,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     // /modalview
-    if (interaction.commandName === "modalview") {
+    if (commandName === "modalview") {
       await interaction.deferReply();
       if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
         await interaction.editReply({ content: '権限がありません', ephemeral: true })
@@ -1240,6 +1322,7 @@ async function sendPage(interaction, modal, responses, page) {
   } else {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
+}
 }
 });
       
