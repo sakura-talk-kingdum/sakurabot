@@ -375,7 +375,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
   } catch (err) {
     console.error("❌ コマンド登録失敗:", err);
     commands.forEach(cmd => {
-    console.error('壊れてるコマンド:', cmd.name, e.message);
+    console.error('壊れてるコマンド:', cmd.name, err);
   });
 
   }
