@@ -29,6 +29,7 @@ import {
   StreamType
 } from '@discordjs/voice';
 import ytdl from 'ytdl-core';
+import playdl from 'play-dl';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import si from 'systeminformation';
 import os from 'os';
@@ -416,6 +417,7 @@ client.on('interactionCreate', async interaction => {
     TextInputBuilder,
     TextInputStyle,
     ytdl,
+    playdl,
     joinVoiceChannel,
     createAudioPlayer,
     createAudioResource,
