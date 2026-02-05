@@ -9,11 +9,18 @@ import { supabase } from "./db.js";
 import { shardState } from "./index.js";
 import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
+import csurf from 'csurf';
 
 const app = express();
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
+
+// CSRF protection using cookies. This protects routes under /admins and /gachas.
+const csrfProtection = csurf({ cookie: true });
+app.use('/admins', csrfProtection);
+app.use('/gachas', csrfProtection);
+
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -353,6 +360,11 @@ app.get("/admins/callback", cors(), async (req, res) => {
     secure: true,
     sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24,
+// CSRF token endpoint for clients (e.g., frontend) to fetch the token.
+app.get('/csrf-token', cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
   });
 
   res.redirect("/admins");
