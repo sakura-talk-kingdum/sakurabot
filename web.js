@@ -371,6 +371,15 @@ app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f
   res.redirect("/admins");
 });
 
+app.get(
+  "/csrf-token",
+  cors({ origin: ["https://bot.sakurahp.f5.si"], credentials: true }),
+  (req, res) => {
+    const token = typeof req.csrfToken === "function" ? req.csrfToken() : null;
+    res.json({ token });
+  }
+);
+
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN;
 
