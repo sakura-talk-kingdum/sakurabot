@@ -511,7 +511,19 @@ app.get("/api/invites/:code", cors(), async (req, res) => {
   const inviteCode = req.params.code
     .replace(".gg", "")
     .replace("discord.gg/", "")
-    .replace("discord.com/invite/","");
+    .replace("discord.com/invite/","")
+    .trim();
+
+  // Validate invite code to prevent misuse in the outgoing request URL
+  // Allow only typical Discord invite characters and enforce a reasonable length.
+  const inviteCodePattern = /^[A-Za-z0-9_-]{1,32}$/;
+  if (!inviteCodePattern.test(inviteCode)) {
+    return res.status(400).json({
+      status: 400,
+      message: "Invalid invite code format",
+      match: false,
+    });
+  }
 
   try {
     const response = await fetch(
