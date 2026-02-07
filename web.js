@@ -359,9 +359,6 @@ app.get("/admins/callback", cors(), async (req, res) => {
     secure: true,
     sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24,
-// CSRF token endpoint for clients (e.g., frontend) to fetch the token.
-app.get('/csrf-token', cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), (req, res) => {
-  res.json({ csrfToken: req.csrfToken() });
 });
 
   });
