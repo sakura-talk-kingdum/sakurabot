@@ -1,0 +1,30 @@
+name: ✨ 機能提案
+description: 新しいアイデアや改善案
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 提案内容
+      description: 追加・改善したい機能
+      placeholder: 〇〇したい
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: なぜ必要か
+      placeholder: 雑談をしやすくなるため
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
+      placeholder: 実装案や参考リンクがあれば
