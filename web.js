@@ -268,6 +268,7 @@ app.get('/', cors(), (req, res) => {
 // コールバック
 app.get('/auth/callback', cors(), handleOAuthCallback);
 
+
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, cors(), async (req, res) => {
   const { data } = await supabase
@@ -354,7 +355,6 @@ app.get("/admins/callback", cors(), async (req, res) => {
   });
 
   res.redirect("/admins");
-});
 
 // ===== 追加処理 =====
 app.post(
