@@ -20,7 +20,6 @@ app.use(cookieParser());
 const csrfProtection = csurf({ cookie: true });
 app.use('/admins', csrfProtection);
 app.use('/gachas', csrfProtection);
-
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -385,15 +384,6 @@ app.post(
   });
 
   res.redirect("/admins");
-  }
-);
-
-app.get(
-  "/csrf-token",
-  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
-  (req, res) => {
-    const token = typeof req.csrfToken === "function" ? req.csrfToken() : null;
-    res.json({ token });
   }
 );
 
