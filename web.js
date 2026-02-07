@@ -385,7 +385,7 @@ app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f
 
 app.get(
   "/csrf-token",
-  cors({ origin: ["https://bot.sakurahp.f5.si"], credentials: true }),
+  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
   (req, res) => {
     const token = typeof req.csrfToken === "function" ? req.csrfToken() : null;
     res.json({ token });
