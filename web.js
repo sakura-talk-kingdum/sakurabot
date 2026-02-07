@@ -266,17 +266,7 @@ app.get('/', cors(), (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', cors(), async (req, res) => {
-  const code = req.query.code;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  try {
-    const html = await handleOAuthCallback({ code, ip });
-    res.send(html);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('認証エラー');
-  }
-});
+app.get('/auth/callback', cors(), handleOAuthCallback);
 
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, cors(), async (req, res) => {
