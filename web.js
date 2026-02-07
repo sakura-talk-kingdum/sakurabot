@@ -371,7 +371,11 @@ app.get('/csrf-token', cors({ origin: ['https://bot.sakurahp.f5.si'], credential
 });
 
 // ===== 追加処理 =====
-app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.post(
+  "/admins/add",
+  requireAdminuser,
+  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
+  async (req, res) => {
   const { targetId, reason } = req.body;
 
   await supabase.from("warned_users").upsert({
@@ -381,7 +385,8 @@ app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f
   });
 
   res.redirect("/admins");
-});
+  }
+);
 
 app.get(
   "/csrf-token",
