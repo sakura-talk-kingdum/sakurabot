@@ -1,21 +1,20 @@
 # Security Policy
 
-## Supported Versions
+## 対応しているバージョン
+現在公開されている最新版(1.0.0)のみをサポート対象とします。
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+## 脆弱性の報告方法
+このリポジトリに関する脆弱性やセキュリティ上の問題を発見した場合は、
+**公開Issueでは報告しないでください。**
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+以下のいずれかの方法でご連絡ください。
 
-## Reporting a Vulnerability
+- Discord: @wataamee_777
+- Email: wataamee777@gmail.com
 
-Use this section to tell people how to report a vulnerability.
+内容を確認後、可能な限り早く対応します。
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+## 対応方針
+- 再現可能な問題を優先して対応します
+- 悪用を目的とした報告には対応しません
+- 修正完了までは内容を非公開でお願いします
