@@ -352,9 +352,10 @@ app.get("/admins/callback", cors(), async (req, res) => {
     maxAge: 1000 * 60 * 60 * 24,
 });
 
+  res.redirect("/admins");
+  
   });
 
-  res.redirect("/admins");
 
 // ===== 追加処理 =====
 app.post(
