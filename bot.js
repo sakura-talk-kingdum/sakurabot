@@ -1,6 +1,7 @@
 // bot.js
 import crypto from 'crypto';
 import fetch from 'node-fetch';
+import net from 'net';
 import {
   Client,
   GatewayIntentBits,
@@ -181,6 +182,12 @@ function isGlobalIP(ip) {
   return true;
 }
 
+function isValidIP(ip) {
+  if (!ip) return false;
+  // Use Node's built-in IP validation to ensure `ip` is a real IPv4/IPv6 address
+  return net.isIP(ip) !== 0;
+}
+
 function extractGlobalIP(ipString) {
   if (!ipString) return null;
 
@@ -199,7 +206,8 @@ function extractGlobalIP(ipString) {
    VPN CHECK
 ===================== */
 async function checkVPN(ip) {
-  if (!isGlobalIP(ip)) return false;
+  // Only proceed if the provided value is a syntactically valid, global IP address
+  if (!isValidIP(ip) || !isGlobalIP(ip)) return false;
 
   try {
     const res = await fetch(
