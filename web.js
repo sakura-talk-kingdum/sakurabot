@@ -16,10 +16,6 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 
-// CSRF protection using cookies. This protects routes under /admins and /gachas.
-const csrfProtection = csurf({ cookie: true });
-app.use('/admins', csrfProtection);
-app.use('/gachas', csrfProtection);
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -266,17 +262,8 @@ app.get('/', cors(), (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', cors(), async (req, res) => {
-  const code = req.query.code;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  try {
-    const html = await handleOAuthCallback({ code, ip });
-    res.send(html);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('認証エラー');
-  }
-});
+app.get('/auth/callback', cors(), handleOAuthCallback);
+
 
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, cors(), async (req, res) => {
@@ -359,10 +346,12 @@ app.get("/admins/callback", cors(), async (req, res) => {
     secure: true,
     sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24,
-  });
+});
 
   res.redirect("/admins");
-});
+  
+  });
+
 
 // ===== 追加処理 =====
 app.post(
@@ -823,11 +812,10 @@ app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: [
 
   const insertData = items.map(item => ({
     set_id: setId,
-    display_id: item.display_id,
     name: item.name,
     rarity: item.rarity,
     amount: item.amount,
-    description: item.description ?? null
+    description: item.description ?? undifiend
   }))
 
   const { error } = await supabase
