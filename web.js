@@ -9,6 +9,7 @@ import { supabase } from "./db.js";
 import { shardState } from "./index.js";
 import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
+import csurf from 'csurf';
 
 const app = express();
 app.use(express.json());
