@@ -765,15 +765,17 @@ if (!selectedRarity) return
 
   const hit = pool[Math.floor(Math.random() * pool.length)]
 
-  /* ===== ログ保存 ===== */
-  await supabase.from('gacha_logs').insert({
-    user_id: message.author.id,
-    guild_id: message.guild.id,
-    set_id: set.id,
-    item_id: hit.id,
-    item_name: hit.name,
-    rarity: hit.rarity
+  /* ===== ログ保存（引いた記録を書き込む） ===== */
+  await supabase
+    .from('gacha_logs')
+    .insert({
+    guild_id: 'guild',           
+    set_id: set.id,              
+    user_id: message.author.id,  
+    display_id: hit.display_id,  
+    rarity: hit.rarity           
   })
+
 
   /* ===== Embed ===== */
   const embed = new EmbedBuilder()
