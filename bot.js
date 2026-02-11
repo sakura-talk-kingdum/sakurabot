@@ -780,7 +780,7 @@ if (!selectedRarity) return
   /* ===== Embed ===== */
   const embed = new EmbedBuilder()
     .setTitle(`🎰 ${set.name}`)
-    .setDescription('**${hit.name}**\n**${hit.description}**')
+    .setDescription(`**${hit.name}**\n**${hit.description}**`)
     .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
