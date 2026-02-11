@@ -811,6 +811,7 @@ app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: [
   const items = Array.isArray(req.body) ? req.body : [req.body]
 
   const insertData = items.map(item => ({
+    display_id: displayid,
     set_id: setId,
     name: item.name,
     rarity: item.rarity,
