@@ -191,6 +191,7 @@ async function loadItems(setId){
     el.insertAdjacentHTML('beforeend', `
       <div class="item">
         <input value="${i.name}" id="iname-${i.id}">
+        <input value="${i.desc}" id="idesc-${i.id}">
         <input value="${i.amount}" type="number" id="iamount-${i.id}">
         <select id="irarity-${i.id}">
           ${['common','uncommon','rare','epic','legend','superlegend']
@@ -205,6 +206,7 @@ async function loadItems(setId){
 
 async function addItem(setId){
   const name = $(`iname-${setId}`).value.trim()
+  const description = $(`idesc-${setId}`).value.trim()
   const amount = Number($(`iamount-${setId}`).value)
   const rarity = $(`irarity-${setId}`).value
   if(!name || amount<=0) return alert('不正')
