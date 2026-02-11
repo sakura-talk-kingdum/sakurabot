@@ -818,7 +818,7 @@ app.post('/gachas/sets/:setId/items',
       name: item.name,
       rarity: item.rarity,
       amount: item.amount,
-      description: item.description ?? null
+      description: item.desc ?? null
     }));
 
     const { error } = await supabase
