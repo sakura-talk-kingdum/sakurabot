@@ -804,31 +804,45 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['
   res.json(data)
 })
 
-app.post('/gachas/sets/:setId/items', 
-  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), 
-  requireAuth, 
-  requireAdmin, 
+app.post('/gachas/sets/:setId/items', cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), requireAuth, requireAdmin, 
   async (req, res) => {
     const { setId } = req.params;
     const items = Array.isArray(req.body) ? req.body : [req.body];
 
-    // display_id は DB が自動生成するので含めない
-    const insertData = items.map(item => ({
-      set_id: setId,
-      name: item.name,
-      rarity: item.rarity,
-      amount: item.amount,
-      description: item.desc ?? null
-    }));
+    try {
+      // そのセット内での現在の最大 display_id を取得
+      const { data: lastItem } = await supabase
+        .from('gacha_items')
+        .select('display_id')
+        .eq('set_id', setId)
+        .order('display_id', { ascending: false })
+        .limit(1)
+        .maybeSingle(); // single()だと0件の時エラーになるのでmaybeSingle
 
-    const { error } = await supabase
-      .from('gacha_items')
-      .insert(insertData);
+      let nextId = (lastItem?.display_id || 0) + 1;
 
-    if (error) return res.status(500).json(error);
+      // 各アイテムに連番を割り当て
+      const insertData = items.map(item => ({
+        display_id: nextId++, // ここでセットごとの連番を付与
+        set_id: setId,
+        name: item.name,
+        rarity: item.rarity,
+        amount: item.amount,
+        description: item.description || null
+      }));
 
-    await recalcProbabilitiesBySet(setId);
-    res.status(201).json({ ok: true });
+      const { error } = await supabase
+        .from('gacha_items')
+        .insert(insertData);
+
+      if (error) throw error;
+
+      await recalcProbabilitiesBySet(setId);
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message });
+    }
 });
 
 app.patch('/gachas/sets/:setId/items/:itemId',  requireAuth,  requireAdmin,  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }),  async (req, res) => {
