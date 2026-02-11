@@ -399,12 +399,14 @@ ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
+  const sub = interaction.options.getSubcommand();
   await handleInteractionCreate(interaction, {
     client,
     fetch,
     chartJSNodeCanvas,
     os,
     si,
+    sub,
     AttachmentBuilder,
     EmbedBuilder,
     ActionRowBuilder,
