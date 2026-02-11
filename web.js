@@ -815,7 +815,7 @@ app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: [
     name: item.name,
     rarity: item.rarity,
     amount: item.amount,
-    description: item.description ?? undifiend
+    description: item.description ?? undefined
   }))
 
   const { error } = await supabase
