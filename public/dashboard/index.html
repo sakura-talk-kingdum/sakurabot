@@ -223,6 +223,7 @@ async function addItem(setId){
 async function saveItem(setId,itemId){
   const body = {}
   const name = $(`iname-${itemId}`).value.trim()
+  const description = $(`idesc-${setId}`).value.trim()
   const amount = Number($(`iamount-${itemId}`).value)
   const rarity = $(`irarity-${itemId}`).value
   if(name) body.name = name
