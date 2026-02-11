@@ -804,29 +804,32 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['
   res.json(data)
 })
 
-app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
-  const { setId } = req.params
+app.post('/gachas/sets/:setId/items', 
+  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), 
+  requireAuth, 
+  requireAdmin, 
+  async (req, res) => {
+    const { setId } = req.params;
+    const items = Array.isArray(req.body) ? req.body : [req.body];
 
-  // 配列で受け取る前提
-  const items = Array.isArray(req.body) ? req.body : [req.body]
+    // display_id は DB が自動生成するので含めない
+    const insertData = items.map(item => ({
+      set_id: setId,
+      name: item.name,
+      rarity: item.rarity,
+      amount: item.amount,
+      description: item.description ?? null
+    }));
 
-  const insertData = items.map(item => ({
-    set_id: setId,
-    name: item.name,
-    rarity: item.rarity,
-    amount: item.amount,
-    description: item.description ?? undefined
-  }))
+    const { error } = await supabase
+      .from('gacha_items')
+      .insert(insertData);
 
-  const { error } = await supabase
-    .from('gacha_items')
-    .insert(insertData)
+    if (error) return res.status(500).json(error);
 
-  if (error) return res.status(500).json(error)
-
-  await recalcProbabilitiesBySet(setId)
-  res.status(201).json({ ok: true })
-})
+    await recalcProbabilitiesBySet(setId);
+    res.status(201).json({ ok: true });
+});
 
 app.patch('/gachas/sets/:setId/items/:itemId',  requireAuth,  requireAdmin,  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }),  async (req, res) => {
     const { setId, itemId } = req.params
