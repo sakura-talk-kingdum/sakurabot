@@ -215,7 +215,7 @@ async function addItem(setId){
     method:'POST',
     credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ name, amount, rarity })
+    body:JSON.stringify({ name, description, amount, rarity })
   })
   loadItems(setId)
 }
@@ -227,6 +227,7 @@ async function saveItem(setId,itemId){
   const amount = Number($(`iamount-${itemId}`).value)
   const rarity = $(`irarity-${itemId}`).value
   if(name) body.name = name
+  if(description) body.description = description
   if(amount>0) body.amount = amount
   if(rarity) body.rarity = rarity
 
