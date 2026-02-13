@@ -19,7 +19,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   Collection,
-  Partial
+  Partials
 } from 'discord.js';
 import {
   joinVoiceChannel,
