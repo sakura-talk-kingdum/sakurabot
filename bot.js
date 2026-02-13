@@ -408,7 +408,7 @@ ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
-  const sub = interaction.options.getSubcommand();
+  const sub = interaction.options.getSubcommand(false);
   await handleInteractionCreate(interaction, {
     client,
     fetch,
