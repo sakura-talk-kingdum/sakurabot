@@ -87,9 +87,14 @@ const channelCooldowns = new Map();
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
+  ],
+  partials: [
+    Partials.Channel, // DMチャンネルを認識するために必須
+    Partials.Message, // DMメッセージを認識するために必須
   ],
   rest: {
     rejectOnRateLimit: (info) => {
