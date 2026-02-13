@@ -793,14 +793,31 @@ if (!selectedRarity) return
   await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
-client.on("messageCreate", async message => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-
-  // shard 0 のみ副作用OK
+  
   const isShard0 = !client.shard || client.shard.ids[0] === 0;
 
-  /* ===== ガチャ処理（あっても無くてもOK） ===== */
   if (isShard0) {
+    
+  if (!message.guild) {
+    if (message.content === 's.tolift') {
+      console.log(`${message.author.tag} がDMで解除をリクエスト`);
+      
+      // 専属Botなら全サーバーから対象者を探す
+      for (const [id, guild] of client.guilds.cache) {
+        const member = await guild.members.fetch(message.author.id).catch(() => null);
+        if (member && member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+          await member.timeout(null, 'DMからの自己解除');
+          return await message.reply('✅ タイムアウトを解除しました。');
+        }
+      }
+      return await message.reply('❌ 権限がないか、サーバーが見つかりません。');
+    }
+    return; 
+  }
+
+  /* ===== ガチャ処理（あっても無くてもOK） ===== */
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
@@ -817,51 +834,6 @@ client.on("messageCreate", async message => {
       }
     }
   }
-// client.on('messageCreate', async message => { ... の中に追加
-if (message.guild === null && message.content === 's.tolift') {
-  console.log('DMコマンドを検知！');
-  try {
-    console.log('try');
-    // 1. ボットが参加している全サーバーから、送信者が「管理者/モデレーター」であるサーバーを探す
-    // 専属Botであれば1つに絞れますが、安全のためにループで処理します
-    const guilds = client.guilds.cache;
-    let successCount = 0;
-    console.log('letok');
-    for (const [guildId, guild] of guilds) {
-      console.log('for');
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member) continue;
-        console.log('GUILDfetchok');
-        // 2. そのサーバーで「タイムアウト権限」を持っているかチェック
-        if (member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-          console.log('権限ok');
-          
-          // 3. タイムアウト中か確認し、解除（timeout(null) で解除）
-          if (member.communicationDisabledUntilTimestamp > Date.now()) {
-            console.log('to解除');
-            await member.timeout(null, 'DMからの自己解除コマンド実行');
-            successCount++;
-          }
-        }
-      } catch (err) {
-        console.error(`Guild ${guild.name} での解除に失敗:`, err);
-      }
-    }
-
-    if (successCount > 0) {
-      await message.reply(`✅ 権限を確認しました。タイムアウトを解除しました。`);
-    } else {
-      await message.reply(`❌ 解除できるタイムアウトが見つからないか、実行権限がありません。`);
-    }
-
-  } catch (error) {
-    console.error('s.tolift Error:', error);
-    await message.reply('内部エラーが発生しました。');
-  }
-}
-
-  /* ===== 以下は常に動く ===== */
 
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);
