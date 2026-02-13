@@ -102,15 +102,11 @@ export const client = new Client({
 function parseDuration(str) {
   if (!str) return 0;
   
-  // フラグから 'g' を外し、個別に判定するか、より厳格な正規表現にします
-  const regex = /(\d{4}-\d{2}-\d{2})|(\d+)(max|w|d|h|m|s)/gi;
+  // 数字がなくても max にマッチするように (\d*) に変更
+  const regex = /(\d{4}-\d{2}-\d{2})|(\d*)\s*(max|w|d|h|m|s)/gi;
   let ms = 0;
 
-  // matchAll の代わりに match を使い、ループを安全にします
-  const matches = str.matchAll(regex);
-  
-  for (const m of matches) {
-    // 日付指定 (YYYY-MM-DD)
+  for (const m of str.matchAll(regex)) {
     if (m[1]) {
       const target = new Date(m[1]).setHours(0, 0, 0, 0);
       const diff = target - Date.now();
@@ -118,23 +114,18 @@ function parseDuration(str) {
       continue;
     }
 
-    const v = parseInt(m[2], 10);
-    const u = m[3]?.toLowerCase();
+    const v = m[2] ? Number(m[2]) : 1; // 数字がない場合は 1 とみなす
+    const u = m[3].toLowerCase();
     
-    if (!u || isNaN(v)) continue;
-
-    switch (u) {
-      case 'max': ms += 2419200000; break; // 28日
-      case 'w': ms += v * 604800000; break;
-      case 'd': ms += v * 86400000; break;
-      case 'h': ms += v * 3600000; break;
-      case 'm': ms += v * 60000; break;
-      case 's': ms += v * 1000; break;
-    }
+    if (u === 'max') ms += 2419200000;
+    else if (u === 'w') ms += v * 604800000;
+    else if (u === 'd') ms += v * 86400000;
+    else if (u === 'h') ms += v * 3600000;
+    else if (u === 'm') ms += v * 60000;
+    else if (u === 's') ms += v * 1000;
   }
 
-  // Discordの制限: 最大28日、最小0
-  return Math.max(0, Math.min(ms, 2419200000));
+  return Math.min(ms, 2419200000);
 }
 
 /* =====================
