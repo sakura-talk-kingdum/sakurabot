@@ -812,6 +812,44 @@ client.on("messageCreate", async message => {
       }
     }
   }
+// client.on('messageCreate', async message => { ... の中に追加
+if (message.guild === null && message.content === 's.tolift') {
+  try {
+    // 1. ボットが参加している全サーバーから、送信者が「管理者/モデレーター」であるサーバーを探す
+    // 専属Botであれば1つに絞れますが、安全のためにループで処理します
+    const guilds = client.guilds.cache;
+    let successCount = 0;
+
+    for (const [guildId, guild] of guilds) {
+      try {
+        const member = await guild.members.fetch(message.author.id).catch(() => null);
+        if (!member) continue;
+
+        // 2. そのサーバーで「タイムアウト権限」を持っているかチェック
+        if (member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+          
+          // 3. タイムアウト中か確認し、解除（timeout(null) で解除）
+          if (member.communicationDisabledUntilTimestamp > Date.now()) {
+            await member.timeout(null, 'DMからの自己解除コマンド実行');
+            successCount++;
+          }
+        }
+      } catch (err) {
+        console.error(`Guild ${guild.name} での解除に失敗:`, err);
+      }
+    }
+
+    if (successCount > 0) {
+      await message.reply(`✅ 権限を確認しました。タイムアウトを解除しました。`);
+    } else {
+      await message.reply(`❌ 解除できるタイムアウトが見つからないか、実行権限がありません。`);
+    }
+
+  } catch (error) {
+    console.error('s.tolift Error:', error);
+    await message.reply('内部エラーが発生しました。');
+  }
+}
 
   /* ===== 以下は常に動く ===== */
 
