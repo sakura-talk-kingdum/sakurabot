@@ -795,7 +795,6 @@ if (!selectedRarity) return
 
 client.on("messageCreate", async message => {
   if (message.author.bot) return;
-  if (!message.guild) return;
 
   // shard 0 のみ副作用OK
   const isShard0 = !client.shard || client.shard.ids[0] === 0;
