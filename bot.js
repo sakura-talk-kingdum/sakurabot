@@ -18,7 +18,8 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  Collection
+  Collection,
+  Partial
 } from 'discord.js';
 import {
   joinVoiceChannel,
