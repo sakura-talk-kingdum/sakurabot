@@ -72,6 +72,7 @@ if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_RO
   throw new Error('環境変数が足りてないよ！');
 }
 
+const DISCORD_LOG_CHANNEL_ID = "1208987840462200882";
 const queues = new Map();
 
 const AI_CHANNEL_ID = "1450782867335549031";
@@ -153,10 +154,11 @@ function formatDurationMs(ms) {
 }
 
 export async function logModerationAction({ guild, action, target, moderator, reason, durationMs }) {
-  if (!1208987840462200882 || !guild) return;
+  
+  if (!DISCORD_LOG_CHANNEL_ID || !guild) return;
 
   try {
-    const channel = await guild.channels.fetch(1208987840462200882);
+    const channel = await guild.channels.fetch(DISCORD_LOG_CHANNEL_ID);
     if (!channel?.isTextBased()) return;
 
     const fields = [
