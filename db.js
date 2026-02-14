@@ -218,3 +218,13 @@ export async function deleteTimeoutContinuation(guildId, userId) {
     throw error;
   }
 }
+
+export async function listDueTimeoutContinuations(now) {
+  const { data, error } = await supabase
+    .from('timeout_continuations')
+    .select('*')
+    .lt('next_apply_at', now); // 現在時刻より前のものを取得
+
+  if (error) throw error;
+  return data || [];
+}
