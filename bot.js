@@ -19,7 +19,8 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  Collection
+  Collection,
+  Partials
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -75,6 +76,7 @@ if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_RO
   throw new Error('環境変数が足りてないよ！');
 }
 
+const DISCORD_LOG_CHANNEL_ID = "1208987840462200882";
 const queues = new Map();
 
 const AI_CHANNEL_ID = "1450782867335549031";
@@ -93,9 +95,14 @@ export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
+  ],
+  partials: [
+    Partials.Channel, // DMチャンネルを認識するために必須
+    Partials.Message, // DMメッセージを認識するために必須
   ],
   rest: {
     rejectOnRateLimit: (info) => {
@@ -114,16 +121,15 @@ function parseDurationDetailed(str) {
   let usedMax = false
 
   for (const m of str.matchAll(regex)) {
-    // 日付指定（YYYY-MM-DD）の場合
     if (m[1]) {
-      const target = new Date(m[1]).setHours(0, 0, 0, 0)
-      const diff = target - Date.now()
-      if (diff > 0) ms += diff
-      continue
+      const target = new Date(m[1]).setHours(0, 0, 0, 0);
+      const diff = target - Date.now();
+      if (diff > 0) ms += diff;
+      continue;
     }
 
-    const v = Number(m[2])
-    const u = m[3].toLowerCase()
+    const v = m[2] ? Number(m[2]) : 1; // 数字がない場合は 1 とみなす
+    const u = m[3].toLowerCase();
     
     if (u === 'max') { ms += DISCORD_TIMEOUT_MAX_MS; usedMax = true; }
     else if (u === 'w') ms += v * 604800000
@@ -588,12 +594,14 @@ ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
+  const sub = interaction.options.getSubcommand(false);
   await handleInteractionCreate(interaction, {
     client,
     fetch,
     chartJSNodeCanvas,
     os,
     si,
+    sub,
     AttachmentBuilder,
     EmbedBuilder,
     ActionRowBuilder,
@@ -1007,35 +1015,53 @@ if (!selectedRarity) return
 
   const hit = pool[Math.floor(Math.random() * pool.length)]
 
-  /* ===== ログ保存 ===== */
-  await supabase.from('gacha_logs').insert({
-    user_id: message.author.id,
-    guild_id: message.guild.id,
-    set_id: set.id,
-    item_id: hit.id,
-    item_name: hit.name,
-    rarity: hit.rarity
+  /* ===== ログ保存（引いた記録を書き込む） ===== */
+  await supabase
+    .from('gacha_logs')
+    .insert({
+    guild_id: 'guild',           
+    set_id: set.id,              
+    user_id: message.author.id,  
+    display_id: hit.display_id,  
+    rarity: hit.rarity           
   })
+
 
   /* ===== Embed ===== */
   const embed = new EmbedBuilder()
     .setTitle(`🎰 ${set.name}`)
-    .setDescription(`**${hit.name}**`)
+    .setDescription(`**${hit.name}**\n**${hit.description}**`)
     .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
   await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
-client.on("messageCreate", async message => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (!message.guild) return;
-
-  // shard 0 のみ副作用OK
+  
   const isShard0 = !client.shard || client.shard.ids[0] === 0;
 
-  /* ===== ガチャ処理（あっても無くてもOK） ===== */
   if (isShard0) {
+    
+  if (!message.guild) {
+    if (message.content === 's.tolift') {
+      console.log(`${message.author.tag} がDMで解除をリクエスト`);
+      
+      // 専属Botなら全サーバーから対象者を探す
+      for (const [id, guild] of client.guilds.cache) {
+        const member = await guild.members.fetch(message.author.id).catch(() => null);
+        if (member && member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+          await member.timeout(null, 'DMからの自己解除');
+          return await message.reply('✅ タイムアウトを解除しました。');
+        }
+      }
+      return await message.reply('❌ 権限がないか、サーバーが見つかりません。');
+    }
+    return; 
+  }
+
+  /* ===== ガチャ処理（あっても無くてもOK） ===== */
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
@@ -1052,8 +1078,6 @@ client.on("messageCreate", async message => {
       }
     }
   }
-
-  /* ===== 以下は常に動く ===== */
 
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);

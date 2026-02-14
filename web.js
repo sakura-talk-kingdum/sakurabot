@@ -16,10 +16,6 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 
-// CSRF protection using cookies. This protects routes under /admins and /gachas.
-const csrfProtection = csurf({ cookie: true });
-app.use('/admins', csrfProtection);
-app.use('/gachas', csrfProtection);
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -266,17 +262,8 @@ app.get('/', cors(), (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', cors(), async (req, res) => {
-  const code = req.query.code;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  try {
-    const html = await handleOAuthCallback({ code, ip });
-    res.send(html);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('認証エラー');
-  }
-});
+app.get('/auth/callback', cors(), handleOAuthCallback);
+
 
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, cors(), async (req, res) => {
@@ -359,10 +346,12 @@ app.get("/admins/callback", cors(), async (req, res) => {
     secure: true,
     sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24,
-  });
+});
 
   res.redirect("/admins");
-});
+  
+  });
+
 
 // ===== 追加処理 =====
 app.post(
@@ -815,30 +804,46 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['
   res.json(data)
 })
 
-app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
-  const { setId } = req.params
+app.post('/gachas/sets/:setId/items', cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), requireAuth, requireAdmin, 
+  async (req, res) => {
+    const { setId } = req.params;
+    const items = Array.isArray(req.body) ? req.body : [req.body];
 
-  // 配列で受け取る前提
-  const items = Array.isArray(req.body) ? req.body : [req.body]
+    try {
+      // そのセット内での現在の最大 display_id を取得
+      const { data: lastItem } = await supabase
+        .from('gacha_items')
+        .select('display_id')
+        .eq('set_id', setId)
+        .order('display_id', { ascending: false })
+        .limit(1)
+        .maybeSingle(); // single()だと0件の時エラーになるのでmaybeSingle
 
-  const insertData = items.map(item => ({
-    set_id: setId,
-    display_id: item.display_id,
-    name: item.name,
-    rarity: item.rarity,
-    amount: item.amount,
-    description: item.description ?? null
-  }))
+      let nextId = (lastItem?.display_id || 0) + 1;
 
-  const { error } = await supabase
-    .from('gacha_items')
-    .insert(insertData)
+      // 各アイテムに連番を割り当て
+      const insertData = items.map(item => ({
+        display_id: nextId++, // ここでセットごとの連番を付与
+        set_id: setId,
+        name: item.name,
+        rarity: item.rarity,
+        amount: item.amount,
+        description: item.description || null
+      }));
 
-  if (error) return res.status(500).json(error)
+      const { error } = await supabase
+        .from('gacha_items')
+        .insert(insertData);
 
-  await recalcProbabilitiesBySet(setId)
-  res.status(201).json({ ok: true })
-})
+      if (error) throw error;
+
+      await recalcProbabilitiesBySet(setId);
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message });
+    }
+});
 
 app.patch('/gachas/sets/:setId/items/:itemId',  requireAuth,  requireAdmin,  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }),  async (req, res) => {
     const { setId, itemId } = req.params

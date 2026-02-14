@@ -1,7 +1,9 @@
 デプロイはコミットしたら開始される
-ログを確認する方法は現在なし
+[render skip]をコミットメッセージに含めることでデプロイスキップ
 https://sakura.kotoca.net
 https://github.com/sakura-talk-kingdum/sakura
 https://bot.sakurahp.f5.si/api
-ESM
-package.jsonを変更したらpackage-lock.jsonもいれかえ
+ESM形式
+discord.js v14
+interaction,commandregisterファイル分離式
+package.jsonを変更したらpackage-lock.jsonは自動生成
