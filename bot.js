@@ -19,7 +19,8 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  Collection
+  Collection,
+  Partials
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -72,6 +73,7 @@ if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_RO
   throw new Error('環境変数が足りてないよ！');
 }
 
+const DISCORD_LOG_CHANNEL_ID = "1208987840462200882";
 const queues = new Map();
 
 const AI_CHANNEL_ID = "1450782867335549031";
@@ -90,9 +92,14 @@ export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
+  ],
+  partials: [
+    Partials.Channel, // DMチャンネルを認識するために必須
+    Partials.Message, // DMメッセージを認識するために必須
   ],
   rest: {
     rejectOnRateLimit: (info) => {
@@ -103,32 +110,91 @@ export const client = new Client({
 });
 
 function parseDuration(str) {
-  // max, w を正規表現に追加。特定の日にち(2025-12-31等)にもマッチするよう修正
-  const regex = /(\d{4}-\d{2}-\d{2})|(\d+)\s*(max|w|d|h|m|s)/gi
-  let ms = 0
+  if (!str) return 0;
+  
+  // 数字がなくても max にマッチするように (\d*) に変更
+  const regex = /(\d{4}-\d{2}-\d{2})|(\d*)\s*(max|w|d|h|m|s)/gi;
+  let ms = 0;
 
   for (const m of str.matchAll(regex)) {
-    // 日付指定（YYYY-MM-DD）の場合
     if (m[1]) {
-      const target = new Date(m[1]).setHours(0, 0, 0, 0)
-      const diff = target - Date.now()
-      if (diff > 0) ms += diff
-      continue
+      const target = new Date(m[1]).setHours(0, 0, 0, 0);
+      const diff = target - Date.now();
+      if (diff > 0) ms += diff;
+      continue;
     }
 
-    const v = Number(m[2])
-    const u = m[3].toLowerCase()
+    const v = m[2] ? Number(m[2]) : 1; // 数字がない場合は 1 とみなす
+    const u = m[3].toLowerCase();
     
-    if (u === 'max') ms += 2419200000 // 28日
-    else if (u === 'w') ms += v * 604800000
-    else if (u === 'd') ms += v * 86400000
-    else if (u === 'h') ms += v * 3600000
-    else if (u === 'm') ms += v * 60000
-    else if (u === 's') ms += v * 1000
+    if (u === 'max') ms += 2419200000;
+    else if (u === 'w') ms += v * 604800000;
+    else if (u === 'd') ms += v * 86400000;
+    else if (u === 'h') ms += v * 3600000;
+    else if (u === 'm') ms += v * 60000;
+    else if (u === 's') ms += v * 1000;
   }
 
-  // Discordの仕様上、最大28日を超えないように制限
-  return Math.min(ms, 2419200000)
+  return Math.min(ms, 2419200000);
+}
+
+function formatDurationMs(ms) {
+  if (!ms || ms <= 0) return "0秒";
+  const totalSec = Math.floor(ms / 1000);
+  const day = Math.floor(totalSec / 86400);
+  const hour = Math.floor((totalSec % 86400) / 3600);
+  const min = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+
+  return [
+    day ? `${day}日` : null,
+    hour ? `${hour}時間` : null,
+    min ? `${min}分` : null,
+    sec ? `${sec}秒` : null
+  ].filter(Boolean).join(" ");
+}
+
+export async function logModerationAction({ guild, action, target, moderator, reason, durationMs }) {
+  
+  if (!DISCORD_LOG_CHANNEL_ID || !guild) return;
+
+  try {
+    const channel = await guild.channels.fetch(DISCORD_LOG_CHANNEL_ID);
+    if (!channel?.isTextBased()) return;
+
+    const fields = [
+      { name: "Action", value: action, inline: true },
+      { name: "Target", value: `${target?.tag ?? "Unknown"} (${target?.id ?? "-"})`, inline: true },
+      { name: "Moderator", value: moderator ? `${moderator.tag} (${moderator.id})` : "Unknown", inline: true }
+    ];
+
+    if (durationMs) {
+      fields.push({ name: "Duration", value: formatDurationMs(durationMs), inline: true });
+    }
+
+    if (reason) {
+      fields.push({ name: "Reason", value: reason.slice(0, 1024) });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🛡️ Moderation Log")
+      .setColor(0xff8855)
+      .addFields(fields)
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error("mod log send failed:", err);
+  }
+}
+
+async function fetchLatestAuditLog(guild, type) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 1 });
+    return logs.entries.first() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function formatDurationMs(ms) {
@@ -496,12 +562,14 @@ ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
+  const sub = interaction.options.getSubcommand(false);
   await handleInteractionCreate(interaction, {
     client,
     fetch,
     chartJSNodeCanvas,
     os,
     si,
+    sub,
     AttachmentBuilder,
     EmbedBuilder,
     ActionRowBuilder,
@@ -907,35 +975,53 @@ if (!selectedRarity) return
 
   const hit = pool[Math.floor(Math.random() * pool.length)]
 
-  /* ===== ログ保存 ===== */
-  await supabase.from('gacha_logs').insert({
-    user_id: message.author.id,
-    guild_id: message.guild.id,
-    set_id: set.id,
-    item_id: hit.id,
-    item_name: hit.name,
-    rarity: hit.rarity
+  /* ===== ログ保存（引いた記録を書き込む） ===== */
+  await supabase
+    .from('gacha_logs')
+    .insert({
+    guild_id: 'guild',           
+    set_id: set.id,              
+    user_id: message.author.id,  
+    display_id: hit.display_id,  
+    rarity: hit.rarity           
   })
+
 
   /* ===== Embed ===== */
   const embed = new EmbedBuilder()
     .setTitle(`🎰 ${set.name}`)
-    .setDescription(`**${hit.name}**`)
+    .setDescription(`**${hit.name}**\n**${hit.description}**`)
     .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
   await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
-client.on("messageCreate", async message => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  if (!message.guild) return;
-
-  // shard 0 のみ副作用OK
+  
   const isShard0 = !client.shard || client.shard.ids[0] === 0;
 
-  /* ===== ガチャ処理（あっても無くてもOK） ===== */
   if (isShard0) {
+    
+  if (!message.guild) {
+    if (message.content === 's.tolift') {
+      console.log(`${message.author.tag} がDMで解除をリクエスト`);
+      
+      // 専属Botなら全サーバーから対象者を探す
+      for (const [id, guild] of client.guilds.cache) {
+        const member = await guild.members.fetch(message.author.id).catch(() => null);
+        if (member && member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+          await member.timeout(null, 'DMからの自己解除');
+          return await message.reply('✅ タイムアウトを解除しました。');
+        }
+      }
+      return await message.reply('❌ 権限がないか、サーバーが見つかりません。');
+    }
+    return; 
+  }
+
+  /* ===== ガチャ処理（あっても無くてもOK） ===== */
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
@@ -952,8 +1038,6 @@ client.on("messageCreate", async message => {
       }
     }
   }
-
-  /* ===== 以下は常に動く ===== */
 
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);
