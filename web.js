@@ -9,11 +9,17 @@ import { supabase } from "./db.js";
 import { shardState } from "./index.js";
 import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
+import csurf from 'csurf';
 
 const app = express();
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
+
+// CSRF protection using cookies. This protects routes under /admins and /gachas.
+const csrfProtection = csurf({ cookie: true });
+app.use('/admins', csrfProtection);
+app.use('/gachas', csrfProtection);
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -359,7 +365,11 @@ app.get("/admins/callback", cors(), async (req, res) => {
 });
 
 // ===== 追加処理 =====
-app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.post(
+  "/admins/add",
+  requireAdminuser,
+  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
+  async (req, res) => {
   const { targetId, reason } = req.body;
 
   await supabase.from("warned_users").upsert({
@@ -369,7 +379,8 @@ app.post("/admins/add", requireAdminuser, cors({origin: ['https://bot.sakurahp.f
   });
 
   res.redirect("/admins");
-});
+  }
+);
 
 const GUILD_ID = process.env.DISCORD_GUILD_ID;
 const DISCORD_TOKEN = process.env.DISCORD_BOT_TOKEN;
