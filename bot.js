@@ -4,6 +4,7 @@ import fetch from 'node-fetch';
 import {
   Client,
   GatewayIntentBits,
+  AuditLogEvent,
   SlashCommandBuilder,
   REST,
   Routes,
@@ -88,6 +89,7 @@ const channelCooldowns = new Map();
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildModeration,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
@@ -132,6 +134,64 @@ function parseDuration(str) {
   }
 
   return Math.min(ms, 2419200000);
+}
+
+function formatDurationMs(ms) {
+  if (!ms || ms <= 0) return "0秒";
+  const totalSec = Math.floor(ms / 1000);
+  const day = Math.floor(totalSec / 86400);
+  const hour = Math.floor((totalSec % 86400) / 3600);
+  const min = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+
+  return [
+    day ? `${day}日` : null,
+    hour ? `${hour}時間` : null,
+    min ? `${min}分` : null,
+    sec ? `${sec}秒` : null
+  ].filter(Boolean).join(" ");
+}
+
+export async function logModerationAction({ guild, action, target, moderator, reason, durationMs }) {
+  if (!DISCORD_MOD_LOG_CHANNEL_ID || !guild) return;
+
+  try {
+    const channel = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+    if (!channel?.isTextBased()) return;
+
+    const fields = [
+      { name: "Action", value: action, inline: true },
+      { name: "Target", value: `${target?.tag ?? "Unknown"} (${target?.id ?? "-"})`, inline: true },
+      { name: "Moderator", value: moderator ? `${moderator.tag} (${moderator.id})` : "Unknown", inline: true }
+    ];
+
+    if (durationMs) {
+      fields.push({ name: "Duration", value: formatDurationMs(durationMs), inline: true });
+    }
+
+    if (reason) {
+      fields.push({ name: "Reason", value: reason.slice(0, 1024) });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🛡️ Moderation Log")
+      .setColor(0xff8855)
+      .addFields(fields)
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error("mod log send failed:", err);
+  }
+}
+
+async function fetchLatestAuditLog(guild, type) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 1 });
+    return logs.entries.first() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /* =====================
@@ -438,6 +498,7 @@ client.on('interactionCreate', async interaction => {
     getPinnedByChannel,
     deletePinned,
     parseDuration,
+    logModerationAction,
     startRecord,
     stopRecord,
     createUserAccount,
@@ -451,6 +512,51 @@ client.on('interactionCreate', async interaction => {
     forumThreadsData,
     GatyaLoad,
     shiikurole
+  });
+});
+
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  const oldTs = oldMember.communicationDisabledUntilTimestamp ?? 0;
+  const newTs = newMember.communicationDisabledUntilTimestamp ?? 0;
+  if (oldTs === newTs) return;
+
+  const isTimeoutSet = newTs > Date.now();
+  const entry = await fetchLatestAuditLog(newMember.guild, AuditLogEvent.MemberUpdate);
+
+  await logModerationAction({
+    guild: newMember.guild,
+    action: isTimeoutSet ? "TIMEOUT" : "UNTIMEOUT",
+    target: newMember.user,
+    moderator: entry?.executor ?? null,
+    reason: entry?.reason ?? null,
+    durationMs: isTimeoutSet ? Math.max(newTs - Date.now(), 0) : null
+  });
+});
+
+client.on("guildBanAdd", async ban => {
+  const entry = await fetchLatestAuditLog(ban.guild, AuditLogEvent.MemberBanAdd);
+
+  await logModerationAction({
+    guild: ban.guild,
+    action: "BAN",
+    target: ban.user,
+    moderator: entry?.executor ?? null,
+    reason: entry?.reason ?? null
+  });
+});
+
+client.on("guildMemberRemove", async member => {
+  const entry = await fetchLatestAuditLog(member.guild, AuditLogEvent.MemberKick);
+  if (!entry || entry.target?.id !== member.id) return;
+  if (Date.now() - entry.createdTimestamp > 15000) return;
+
+  await logModerationAction({
+    guild: member.guild,
+    action: "KICK",
+    target: member.user,
+    moderator: entry.executor ?? null,
+    reason: entry.reason ?? null
+  });
   });
 });
       
