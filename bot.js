@@ -45,6 +45,9 @@ import {
   findUserByIPandUA,
   insertAuthLog,
   insertModerationLog,
+  upsertTimeoutContinuation,
+  deleteTimeoutContinuation,
+  listDueTimeoutContinuations,
   getPinnedByChannel,
   upsertPinned,
   deletePinned
@@ -109,12 +112,13 @@ export const client = new Client({
   }
 });
 
-function parseDuration(str) {
-  if (!str) return 0;
-  
-  // 数字がなくても max にマッチするように (\d*) に変更
-  const regex = /(\d{4}-\d{2}-\d{2})|(\d*)\s*(max|w|d|h|m|s)/gi;
-  let ms = 0;
+const DISCORD_TIMEOUT_MAX_MS = 28 * 24 * 60 * 60 * 1000;
+
+function parseDurationDetailed(str) {
+  // max, w を正規表現に追加。特定の日にち(2025-12-31等)にもマッチするよう修正
+  const regex = /(\d{4}-\d{2}-\d{2})|(\d+)\s*(max|w|d|h|m|s)/gi
+  let ms = 0
+  let usedMax = false
 
   for (const m of str.matchAll(regex)) {
     if (m[1]) {
@@ -127,74 +131,30 @@ function parseDuration(str) {
     const v = m[2] ? Number(m[2]) : 1; // 数字がない場合は 1 とみなす
     const u = m[3].toLowerCase();
     
-    if (u === 'max') ms += 2419200000;
-    else if (u === 'w') ms += v * 604800000;
-    else if (u === 'd') ms += v * 86400000;
-    else if (u === 'h') ms += v * 3600000;
-    else if (u === 'm') ms += v * 60000;
-    else if (u === 's') ms += v * 1000;
+    if (u === 'max') { ms += DISCORD_TIMEOUT_MAX_MS; usedMax = true; }
+    else if (u === 'w') ms += v * 604800000
+    else if (u === 'd') ms += v * 86400000
+    else if (u === 'h') ms += v * 3600000
+    else if (u === 'm') ms += v * 60000
+    else if (u === 's') ms += v * 1000
   }
 
-  return Math.min(ms, 2419200000);
+  const now = Date.now();
+  const cappedMs = Math.min(ms, DISCORD_TIMEOUT_MAX_MS);
+
+  return {
+    totalMs: ms,
+    cappedMs,
+    usedMax,
+    targetUntil: ms > 0 ? new Date(now + ms).toISOString() : null,
+    nextApplyAt: ms > DISCORD_TIMEOUT_MAX_MS && !usedMax
+      ? new Date(now + DISCORD_TIMEOUT_MAX_MS).toISOString()
+      : null
+  };
 }
 
-function formatDurationMs(ms) {
-  if (!ms || ms <= 0) return "0秒";
-  const totalSec = Math.floor(ms / 1000);
-  const day = Math.floor(totalSec / 86400);
-  const hour = Math.floor((totalSec % 86400) / 3600);
-  const min = Math.floor((totalSec % 3600) / 60);
-  const sec = totalSec % 60;
-
-  return [
-    day ? `${day}日` : null,
-    hour ? `${hour}時間` : null,
-    min ? `${min}分` : null,
-    sec ? `${sec}秒` : null
-  ].filter(Boolean).join(" ");
-}
-
-export async function logModerationAction({ guild, action, target, moderator, reason, durationMs }) {
-  
-  if (!DISCORD_LOG_CHANNEL_ID || !guild) return;
-
-  try {
-    const channel = await guild.channels.fetch(DISCORD_LOG_CHANNEL_ID);
-    if (!channel?.isTextBased()) return;
-
-    const fields = [
-      { name: "Action", value: action, inline: true },
-      { name: "Target", value: `${target?.tag ?? "Unknown"} (${target?.id ?? "-"})`, inline: true },
-      { name: "Moderator", value: moderator ? `${moderator.tag} (${moderator.id})` : "Unknown", inline: true }
-    ];
-
-    if (durationMs) {
-      fields.push({ name: "Duration", value: formatDurationMs(durationMs), inline: true });
-    }
-
-    if (reason) {
-      fields.push({ name: "Reason", value: reason.slice(0, 1024) });
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle("🛡️ Moderation Log")
-      .setColor(0xff8855)
-      .addFields(fields)
-      .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
-  } catch (err) {
-    console.error("mod log send failed:", err);
-  }
-}
-
-async function fetchLatestAuditLog(guild, type) {
-  try {
-    const logs = await guild.fetchAuditLogs({ type, limit: 1 });
-    return logs.entries.first() ?? null;
-  } catch {
-    return null;
-  }
+function parseDuration(str) {
+  return parseDurationDetailed(str).cappedMs
 }
 
 function formatDurationMs(ms) {
@@ -279,6 +239,78 @@ export async function logModerationAction({ guild, action, target, moderator, re
     await channel.send({ embeds: [embed] });
   } catch (err) {
     console.error("mod log send failed:", err);
+  }
+}
+
+async function scheduleTimeoutContinuation({ guildId, userId, reason, targetUntil, nextApplyAt }) {
+  try {
+    await upsertTimeoutContinuation({
+      guildId,
+      targetUserId: userId,
+      reason: reason ?? null,
+      targetUntil,
+      nextApplyAt
+    });
+  } catch (err) {
+    console.error("timeout continuation save failed:", err);
+  }
+}
+
+async function clearTimeoutContinuation(guildId, userId) {
+  try {
+    await deleteTimeoutContinuation(guildId, userId);
+  } catch (err) {
+    console.error("timeout continuation delete failed:", err);
+  }
+}
+
+let processingTimeoutContinuations = false;
+async function processDueTimeoutContinuations() {
+  if (processingTimeoutContinuations) return;
+  processingTimeoutContinuations = true;
+
+  try {
+    const jobs = await listDueTimeoutContinuations(new Date().toISOString());
+
+    for (const job of jobs) {
+      try {
+        const guild = await client.guilds.fetch(job.guild_id);
+        const member = await guild.members.fetch(job.target_user_id);
+
+        if (await shouldSkipModerationTarget(guild, member.id, member)) {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+          continue;
+        }
+
+        const remaining = new Date(job.target_until).getTime() - Date.now();
+        if (remaining <= 0) {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+          continue;
+        }
+
+        const applyMs = Math.min(remaining, DISCORD_TIMEOUT_MAX_MS);
+        await member.timeout(applyMs, job.reason ?? "長期タイムアウト継続");
+
+        if (remaining > DISCORD_TIMEOUT_MAX_MS) {
+          const nextApplyAt = new Date(Date.now() + applyMs + 1_000).toISOString();
+          await scheduleTimeoutContinuation({
+            guildId: guild.id,
+            userId: member.id,
+            reason: job.reason,
+            targetUntil: job.target_until,
+            nextApplyAt
+          });
+        } else {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+        }
+      } catch (err) {
+        console.error("timeout continuation process failed:", err);
+      }
+    }
+  } catch (err) {
+    console.error("timeout continuation batch failed:", err);
+  } finally {
+    processingTimeoutContinuations = false;
   }
 }
 
@@ -595,6 +627,9 @@ client.on('interactionCreate', async interaction => {
     getPinnedByChannel,
     deletePinned,
     parseDuration,
+    parseDurationDetailed,
+    scheduleTimeoutContinuation,
+    clearTimeoutContinuation,
     logModerationAction,
     startRecord,
     stopRecord,
@@ -658,6 +693,11 @@ client.on("guildMemberRemove", async member => {
   });
 });
       
+processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
+setInterval(() => {
+  processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
+}, 30_000);
+
 /* 
   ガチャのデータ読み込み
 */
