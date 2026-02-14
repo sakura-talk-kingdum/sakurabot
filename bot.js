@@ -153,10 +153,10 @@ function formatDurationMs(ms) {
 }
 
 export async function logModerationAction({ guild, action, target, moderator, reason, durationMs }) {
-  if (!DISCORD_MOD_LOG_CHANNEL_ID || !guild) return;
+  if (!1208987840462200882 || !guild) return;
 
   try {
-    const channel = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+    const channel = await guild.channels.fetch(1208987840462200882);
     if (!channel?.isTextBased()) return;
 
     const fields = [
