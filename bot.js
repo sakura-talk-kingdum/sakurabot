@@ -4,6 +4,7 @@ import fetch from 'node-fetch';
 import {
   Client,
   GatewayIntentBits,
+  AuditLogEvent,
   SlashCommandBuilder,
   REST,
   Routes,
@@ -29,6 +30,7 @@ import {
   StreamType
 } from '@discordjs/voice';
 import ytdl from 'ytdl-core';
+import playdl from 'play-dl';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import si from 'systeminformation';
 import os from 'os';
@@ -41,11 +43,16 @@ import {
   upsertUserAuth,
   findUserByIPandUA,
   insertAuthLog,
+  insertModerationLog,
+  upsertTimeoutContinuation,
+  deleteTimeoutContinuation,
+  listDueTimeoutContinuations,
   getPinnedByChannel,
   upsertPinned,
   deletePinned
 } from "./db.js";
 import { commands } from "./lib/command/command.js";
+import { handleInteractionCreate } from "./lib/interaction/interactionCreate.js";
 
 const width = 400;
 const height = 400;
@@ -85,6 +92,7 @@ const channelCooldowns = new Map();
 export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
@@ -97,10 +105,13 @@ export const client = new Client({
   }
 });
 
-function parseDuration(str) {
+const DISCORD_TIMEOUT_MAX_MS = 28 * 24 * 60 * 60 * 1000;
+
+function parseDurationDetailed(str) {
   // max, w を正規表現に追加。特定の日にち(2025-12-31等)にもマッチするよう修正
   const regex = /(\d{4}-\d{2}-\d{2})|(\d+)\s*(max|w|d|h|m|s)/gi
   let ms = 0
+  let usedMax = false
 
   for (const m of str.matchAll(regex)) {
     // 日付指定（YYYY-MM-DD）の場合
@@ -114,7 +125,7 @@ function parseDuration(str) {
     const v = Number(m[2])
     const u = m[3].toLowerCase()
     
-    if (u === 'max') ms += 2419200000 // 28日
+    if (u === 'max') { ms += DISCORD_TIMEOUT_MAX_MS; usedMax = true; }
     else if (u === 'w') ms += v * 604800000
     else if (u === 'd') ms += v * 86400000
     else if (u === 'h') ms += v * 3600000
@@ -122,8 +133,188 @@ function parseDuration(str) {
     else if (u === 's') ms += v * 1000
   }
 
-  // Discordの仕様上、最大28日を超えないように制限
-  return Math.min(ms, 2419200000)
+  const now = Date.now();
+  const cappedMs = Math.min(ms, DISCORD_TIMEOUT_MAX_MS);
+
+  return {
+    totalMs: ms,
+    cappedMs,
+    usedMax,
+    targetUntil: ms > 0 ? new Date(now + ms).toISOString() : null,
+    nextApplyAt: ms > DISCORD_TIMEOUT_MAX_MS && !usedMax
+      ? new Date(now + DISCORD_TIMEOUT_MAX_MS).toISOString()
+      : null
+  };
+}
+
+function parseDuration(str) {
+  return parseDurationDetailed(str).cappedMs
+}
+
+function formatDurationMs(ms) {
+  if (!ms || ms <= 0) return "0秒";
+  const totalSec = Math.floor(ms / 1000);
+  const day = Math.floor(totalSec / 86400);
+  const hour = Math.floor((totalSec % 86400) / 3600);
+  const min = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+
+  return [
+    day ? `${day}日` : null,
+    hour ? `${hour}時間` : null,
+    min ? `${min}分` : null,
+    sec ? `${sec}秒` : null
+  ].filter(Boolean).join(" ");
+}
+
+async function shouldSkipModerationTarget(guild, targetId, targetMember) {
+  if (!shiikurole || !guild) return false;
+
+  if (targetMember?.roles?.cache?.has(shiikurole)) {
+    return true;
+  }
+
+  if (!targetId) return false;
+
+  try {
+    const member = await guild.members.fetch(targetId);
+    return member.roles.cache.has(shiikurole);
+  } catch {
+    return false;
+  }
+}
+
+export async function logModerationAction({ guild, action, target, moderator, reason, durationMs, targetMember }) {
+  if (!guild || !target?.id) return;
+
+  if (await shouldSkipModerationTarget(guild, target.id, targetMember)) {
+    return;
+  }
+
+  try {
+    await insertModerationLog({
+      guildId: guild.id,
+      targetUserId: target.id,
+      moderatorUserId: moderator?.id ?? null,
+      action,
+      reason: reason ?? null,
+      durationMs: durationMs ?? null
+    });
+  } catch (err) {
+    console.error("mod log db insert failed:", err);
+  }
+
+  if (!DISCORD_MOD_LOG_CHANNEL_ID) return;
+
+  try {
+    const channel = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+    if (!channel?.isTextBased()) return;
+
+    const fields = [
+      { name: "Action", value: action, inline: true },
+      { name: "Target", value: `${target?.tag ?? "Unknown"} (${target?.id ?? "-"})`, inline: true },
+      { name: "Moderator", value: moderator ? `${moderator.tag} (${moderator.id})` : "Unknown", inline: true }
+    ];
+
+    if (durationMs) {
+      fields.push({ name: "Duration", value: formatDurationMs(durationMs), inline: true });
+    }
+
+    if (reason) {
+      fields.push({ name: "Reason", value: reason.slice(0, 1024) });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🛡️ Moderation Log")
+      .setColor(0xff8855)
+      .addFields(fields)
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error("mod log send failed:", err);
+  }
+}
+
+async function scheduleTimeoutContinuation({ guildId, userId, reason, targetUntil, nextApplyAt }) {
+  try {
+    await upsertTimeoutContinuation({
+      guildId,
+      targetUserId: userId,
+      reason: reason ?? null,
+      targetUntil,
+      nextApplyAt
+    });
+  } catch (err) {
+    console.error("timeout continuation save failed:", err);
+  }
+}
+
+async function clearTimeoutContinuation(guildId, userId) {
+  try {
+    await deleteTimeoutContinuation(guildId, userId);
+  } catch (err) {
+    console.error("timeout continuation delete failed:", err);
+  }
+}
+
+let processingTimeoutContinuations = false;
+async function processDueTimeoutContinuations() {
+  if (processingTimeoutContinuations) return;
+  processingTimeoutContinuations = true;
+
+  try {
+    const jobs = await listDueTimeoutContinuations(new Date().toISOString());
+
+    for (const job of jobs) {
+      try {
+        const guild = await client.guilds.fetch(job.guild_id);
+        const member = await guild.members.fetch(job.target_user_id);
+
+        if (await shouldSkipModerationTarget(guild, member.id, member)) {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+          continue;
+        }
+
+        const remaining = new Date(job.target_until).getTime() - Date.now();
+        if (remaining <= 0) {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+          continue;
+        }
+
+        const applyMs = Math.min(remaining, DISCORD_TIMEOUT_MAX_MS);
+        await member.timeout(applyMs, job.reason ?? "長期タイムアウト継続");
+
+        if (remaining > DISCORD_TIMEOUT_MAX_MS) {
+          const nextApplyAt = new Date(Date.now() + applyMs + 1_000).toISOString();
+          await scheduleTimeoutContinuation({
+            guildId: guild.id,
+            userId: member.id,
+            reason: job.reason,
+            targetUntil: job.target_until,
+            nextApplyAt
+          });
+        } else {
+          await clearTimeoutContinuation(job.guild_id, job.target_user_id);
+        }
+      } catch (err) {
+        console.error("timeout continuation process failed:", err);
+      }
+    }
+  } catch (err) {
+    console.error("timeout continuation batch failed:", err);
+  } finally {
+    processingTimeoutContinuations = false;
+  }
+}
+
+async function fetchLatestAuditLog(guild, type) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 1 });
+    return logs.entries.first() ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /* =====================
@@ -397,951 +588,108 @@ ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
-  if (client.shard && client.shard.ids[0] !== 0) return;
-    const adminPermissionLevelRequired = 8;
-    const userPermissionLevel = interaction.member?.permissions?.bitfield ?? 0;
-  if (interaction.isChatInputCommand()) {
-  console.log("🔥 command:", interaction.commandName, "sub:", interaction.options.getSubcommand(false));
-  const { commandName } = interaction;
-  const sub = interaction.options.getSubcommand(false);
-
-  if (commandName === 'ping') {
-
-  try {
-    await interaction.deferReply() 
-    // CPU使用率
-    const loadData = os.cpus;
-    const cpuLoadInfo = await si.currentLoad();
-    const cpuLoad = cpuLoadInfo.currentLoad.toFixed(2);
-
-    // メモリ
-    const mem = await si.mem().catch(() => ({ total: 0, available: 0 }));
-    const memUsed = mem.total && mem.available ? ((mem.total - mem.available) / 1024 / 1024 / 1024).toFixed(2) : '0';
-    const memFree = mem.available ? (mem.available / 1024 / 1024 / 1024).toFixed(2) : '0';
-    const memTotal = mem.total ? (mem.total / 1024 / 1024 / 1024).toFixed(2) : '0';
-
-    // ネットワーク
-    const netStats = await si.networkStats().catch(() => [{ rx_sec:0, tx_sec:0 }]);
-    const netSpeed = netStats[0] ? ((netStats[0].rx_sec + netStats[0].tx_sec)/1024/1024).toFixed(2) : '0';
-
-    // CPU詳細
-    const cpu = await si.cpu().catch(() => ({ brand: 'Unknown', cores: 0, logicalCores: 0, speed: 0 }));
-
-    // uptime
-    const uptime = os.uptime();
-    const ping = Math.floor(Math.random() * 50) + 20; // 仮Ping
-
-    // ドーナツグラフ
-    const config = {
-      type: 'doughnut',
-      data: {
-        labels: ['CPU %', 'メモリ使用', 'メモリ空き', 'ネットワーク MB/s'],
-        datasets: [{
-          data: [cpuLoad, memUsed, memFree, netSpeed],
-          backgroundColor: ['#FF6384', '#36A2EB', '#4BC0C0', '#FFCE56'],
-        }]
-      },
-      options: {
-        plugins: { legend: { position: 'bottom' } },
-        responsive: false,
-      }
-    };
-
-    const buffer = await chartJSNodeCanvas.renderToBuffer(config);
-    const attachment = new AttachmentBuilder(buffer, { name: 'stats.png' });
-
-    // Embedで詳細情報も表示
-    await interaction.editReply({
-      content: `CPU: ${cpu.brand}\nコア数: ${cpu.cores}, スレッド数: ${cpu.logicalCores}\nクロック: ${cpu.speed} GHz\nCPU使用率: ${cpuLoad} %\n稼働時間: ${Math.floor(uptime/60)} min\nPing: ${ping} ms\nネットワークスピード: ${netSpeed} MB/s、\nメモリ総量: ${memTotal} GB\n空きメモリ: ${memFree} GB`,
-      files: [attachment]
-    });
-
-} catch (err) {
-  console.error("Error in /ping:", err);
-
-  if (interaction.deferred && !interaction.replied) {
-    // defer 済み → editReply only
-    await interaction.editReply("❌ エラーが発生しました").catch(console.error);
-  } else if (!interaction.replied) {
-    // defer できてなかった時
-    await interaction.reply("❌ エラーが発生しました").catch(console.error);
-  }
-}
-  }     
-  if (commandName === "poll") {
-
-  const title = interaction.options.getString("title");
-  const rawData = interaction.options.getString("data");
-
-  try {
-    await interaction.deferReply({ ephemeral: false });
-
-    const pairs = rawData.split(",").map(x => x.trim());
-    const choices = [];
-
-    for (const pair of pairs) {
-      const match = pair.match(/^([a-z])_'(.+)'$/i);
-      if (!match) continue;
-
-      const key = match[1].toLowerCase();
-      const text = match[2];
-
-      choices.push({ key, text });
-    }
-
-    if (choices.length === 0) {
-      return interaction.editReply("❌ データ形式が正しくないよ！");
-    }
-
-    const description = choices
-      .map(c => `:regional_indicator_${c.key}:  ${c.text}`)
-      .join("\n");
-
-    const embed = new EmbedBuilder()
-      .setTitle(title)
-      .setDescription(description)
-      .setColor(0xff77aa);
-
-    const sent = await interaction.editReply({ embeds: [embed] });
-
-    for (const c of choices) {
-      const base = "🇦".codePointAt(0); // OK
-// だが offset 計算は問題なし。これは許容
-      const offset = c.key.charCodeAt(0) - 97;
-      const emoji = String.fromCodePoint(base + offset);
-
-      await sent.react(emoji).catch(() => {});
-      await wait(450); // 防レート制限
-    }
-
-  } catch (err) {
-    console.error("Error in /poll:", err);
-    if (!interaction.replied && !interaction.deferred) {
-      interaction.reply({ content: "❌ エラーが発生したよ！", flags: MessageFlags.Ephemeral }).catch(() => {});
-    }
-  }
-  }
-    if (commandName === 'auth') {
-      if (!interaction.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        await interaction.reply({ content: '❌ 管理者のみ使用可能です', flags: 64 });
-        return;
-      }
-      const authUrl = `https://bot.sakurahp.f5.si/auth`;
-      const embed = new EmbedBuilder()
-        .setTitle('🔐 認証パネル')
-        .setDescription('以下のボタンから認証を進めてください。')
-        .setColor(0x5865F2);
-      const row = new ActionRowBuilder()
-        .addComponents(new ButtonBuilder().setLabel('認証サイトへ').setStyle(ButtonStyle.Link).setURL(authUrl));
-      return interaction.reply({ embeds: [embed], components: [row], flags: 64 });
-    }
-
-    if (commandName === 'report') {
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const userid = interaction.options.getString('userid');
-      const reason = interaction.options.getString('reason');
-      const file = interaction.options.getAttachment('file');
-
-      const reportEmbed = new EmbedBuilder()
-        .setTitle('🚨 ユーザー通報')
-        .setColor(0xED4245)
-        .addFields(
-          { name: '通報者', value: `<@${interaction.user.id}> (${interaction.user.tag})`, inline: true },
-          { name: '対象ユーザー', value: `<@${userid}> (${userid})`, inline: true },
-          { name: '理由', value: reason }
-        )
-        .setTimestamp();
-
-      const reportChannel = await client.channels.fetch(1208987840462200882).catch(() => null);
-      if (!reportChannel?.isTextBased()) return interaction.editReply('❌ 通報チャンネルが見つかりません');
-
-      if (file) await reportChannel.send({ embeds: [reportEmbed], files: [{ attachment: file.url }] });
-      else await reportChannel.send({ embeds: [reportEmbed] });
-
-      return interaction.editReply('✅ 通報を送信しました！');
-    }
-
-    if (commandName === 'msgpin') {
-      if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-        await interaction.reply({ content: '権限がありません', ephemeral: true })
-        return;
-      }
-
-  await interaction.deferReply({ ephemeral: true });
-  const msg = interaction.options.getString('msg');
-  const channelId = interaction.channel.id;
-
-  const embed = new EmbedBuilder()
-    .setDescription(msg)
-    .setColor(0x00AE86)
-    .setFooter({ text: `📌 投稿者: ${interaction.user.tag}` })
-    .setTimestamp();
-
-  const sent = await interaction.channel.send({ embeds: [embed] });
-  await upsertPinned(channelId, sent.id, msg, interaction.user.tag);
-
-  return interaction.editReply({ content: '📌 メッセージを固定しました！' });
-}
-
-    if (commandName === 'unpin') {
-      if (!interaction.memberPermissions.has(PermissionFlagsBits.Administrator)) {
-        await interaction.reply({ content: '権限がありません', ephemeral: true })
-        return;
-      }
-
-      const channelId = interaction.channel.id;
-      const existing = await getPinnedByChannel(channelId);
-      if (!existing) return interaction.reply({ content: '❌ このチャンネルには固定メッセージがありません', flags: MessageFlags.Ephemeral});
-
-      const pinnedMsgId = existing.message_id;
-      const msg = await interaction.channel.messages.fetch(pinnedMsgId).catch(() => null);
-      if (msg) await msg.delete().catch(() => {});
-      await deletePinned(channelId);
-
-      return interaction.reply({ content: '🗑️ 固定メッセージを解除しました！', flags: MessageFlags.Ephemeral});
-    }
-  /* ===== timeout ===== */
-  if (commandName === 'timeout') {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      await interaction.reply({ content: '権限がありません', ephemeral: true })
-      return;
-    }
-
-    const user = interaction.options.getUser('user')
-    const timeStr = interaction.options.getString('time')
-    const reason = interaction.options.getString('reason') ?? '理由なし'
-
-    const duration = parseDuration(timeStr)
-    if (!duration || duration <= 0) {
-      await interaction.reply({ content: '時間指定が不正です', ephemeral: true })
-      return
-    }
-
-    const member = await interaction.guild.members.fetch(user.id)
-
-    if (!member.moderatable) {
-      await interaction.reply({ content: 'このユーザーはタイムアウトできません', ephemeral: true })
-      return
-    }
-
-    await member.timeout(duration, reason)
-
-    await interaction.reply({
-      content: `⏱ **${user.tag}** を **${timeStr}** タイムアウトしました`
-    })
-    return
-  }
-
-  /* ===== untimeout ===== */
-  if (commandName === 'untimeout') {
-    if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-      await interaction.reply({ content: '権限がありません', ephemeral: true })
-      return
-    }
-
-    const user = interaction.options.getUser('user')
-    const member = await interaction.guild.members.fetch(user.id)
-
-    if (!member.moderatable) {
-      await interaction.reply({ content: 'このユーザーは解除できません', ephemeral: true })
-      return
-    }
-
-    await member.timeout(null)
-
-    await interaction.reply({
-      content: `✅ **${user.tag}** のタイムアウトを解除しました`
-    })
-    return
-  }
-
-//-/play ---
-  if (commandName === 'play') {
-
-  const url = interaction.options.getString("url");
-
-  if (!ytdl.validateURL(url)) {
-    return interaction.reply({
-      content: "❌ 無効なYouTube URLです",
-      ephemeral: true
-    });
-  }
-
-  const channel = interaction.member.voice?.channel;
-  if (!channel) {
-    return interaction.reply({
-      content: "🔊 先にボイスチャンネルに参加してね",
-      ephemeral: true
-    });
-  }
-
-  await interaction.reply({
-    embeds: [
-      new EmbedBuilder()
-        .setDescription("▶️ 再生準備中…")
-        .setColor(0xaaaaaa)
-    ]
+  await handleInteractionCreate(interaction, {
+    client,
+    fetch,
+    chartJSNodeCanvas,
+    os,
+    si,
+    AttachmentBuilder,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    MessageFlags,
+    PermissionsBitField,
+    PermissionFlagsBits,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
+    ytdl,
+    playdl,
+    joinVoiceChannel,
+    createAudioPlayer,
+    createAudioResource,
+    AudioPlayerStatus,
+    entersState,
+    StreamType,
+    queues,
+    supabase,
+    upsertPinned,
+    getPinnedByChannel,
+    deletePinned,
+    parseDuration,
+    parseDurationDetailed,
+    scheduleTimeoutContinuation,
+    clearTimeoutContinuation,
+    logModerationAction,
+    startRecord,
+    stopRecord,
+    createUserAccount,
+    deleteUserAccount,
+    transferUserAccount,
+    fetchUserAccount,
+    calculateUserLevel,
+    ALLOWED_CHANNEL_IDS,
+    CHANNEL_COOLDOWN_MS,
+    channelCooldowns,
+    forumThreadsData,
+    GatyaLoad,
+    shiikurole
   });
+});
 
-  const connection = joinVoiceChannel({
-    channelId: channel.id,
-    guildId: channel.guild.id,
-    adapterCreator: channel.guild.voiceAdapterCreator,
-    selfDeaf: true,
-    selfMute: false
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  const oldTs = oldMember.communicationDisabledUntilTimestamp ?? 0;
+  const newTs = newMember.communicationDisabledUntilTimestamp ?? 0;
+  if (oldTs === newTs) return;
+
+  const isTimeoutSet = newTs > Date.now();
+  const entry = await fetchLatestAuditLog(newMember.guild, AuditLogEvent.MemberUpdate);
+
+  await logModerationAction({
+    guild: newMember.guild,
+    action: isTimeoutSet ? "TIMEOUT" : "UNTIMEOUT",
+    target: newMember.user,
+    moderator: entry?.executor ?? null,
+    reason: entry?.reason ?? null,
+    durationMs: isTimeoutSet ? Math.max(newTs - Date.now(), 0) : null,
+    targetMember: newMember
   });
+});
 
-  const player = createAudioPlayer();
-  connection.subscribe(player);
+client.on("guildBanAdd", async ban => {
+  const entry = await fetchLatestAuditLog(ban.guild, AuditLogEvent.MemberBanAdd);
 
-  const stream = ytdl(ytdl.getURLVideoID(url), {
-    filter: format =>
-      format.audioCodec === "opus" &&
-      format.container === "webm",
-    quality: "highest",
-    highWaterMark: 32 * 1024 * 1024
+  await logModerationAction({
+    guild: ban.guild,
+    action: "BAN",
+    target: ban.user,
+    moderator: entry?.executor ?? null,
+    reason: entry?.reason ?? null
   });
+});
 
-  const resource = createAudioResource(stream, {
-    inputType: StreamType.WebmOpus
+client.on("guildMemberRemove", async member => {
+  const entry = await fetchLatestAuditLog(member.guild, AuditLogEvent.MemberKick);
+  if (!entry || entry.target?.id !== member.id) return;
+  if (Date.now() - entry.createdTimestamp > 15000) return;
+
+  await logModerationAction({
+    guild: member.guild,
+    action: "KICK",
+    target: member.user,
+    moderator: entry.executor ?? null,
+    reason: entry.reason ?? null,
+    targetMember: member
   });
-
-  player.play(resource);
-
-  try {
-    await entersState(player, AudioPlayerStatus.Playing, 10_000);
-
-    await interaction.editReply({
-      embeds: [
-        new EmbedBuilder()
-          .setDescription("🎶 再生中")
-          .setColor(0x55ff99)
-      ]
-    });
-
-    await entersState(player, AudioPlayerStatus.Idle, 24 * 60 * 60 * 1000);
-  } catch (e) {
-    console.error(e);
-    await interaction.editReply("⚠️ 再生に失敗しました");
-  } finally {
-    connection.destroy();
-  }
-  }
-
-  // --- /skip ---
-  if (commandName === 'skip') {
-    const guildQueue = queues.get(interaction.guild.id);
-    if (!guildQueue || guildQueue.songs.length <= 1)
-      return interaction.reply('⚠️ スキップできる曲がないよ！');
-    guildQueue.player.stop(true);
-    interaction.reply('⏭️ スキップしたよ！');
-  }
-
-  // --- /stop ---
-  if (commandName === 'stop') {
-    const guildQueue = queues.get(interaction.guild.id);
-    if (!guildQueue) return interaction.reply('⚠️ 何も再生してないよ！');
-    guildQueue.songs = [];
-    guildQueue.player.stop();
-    if (guildQueue.connection) guildQueue.connection.destroy();
-    queues.delete(interaction.guild.id);
-    interaction.reply('🛑 再生を停止して退出したよ！');
-  }
-
-  // --- /playlist ---
-  if (commandName === 'playlist') {
-    const guildQueue = queues.get(interaction.guild.id);
-    if (!guildQueue || guildQueue.songs.length === 0)
-      return interaction.reply('📭 再生中のプレイリストは空っぽ！');
-
-    const list = guildQueue.songs
-      .map((s, i) => `${i === 0 ? '▶️' : `${i}.`} ${s.title}`)
-      .join('\n');
-    interaction.reply(`🎵 **再生キュー:**\n${list}`);
-  }
-
-  if (commandName === 'gatyareload'){
-    const embed = new EmbedBuilder()
-        .setTitle("ガチャ設定再読み込み")
-        .setColor(0x4dd0e1)
-        .setDescription("設定の再読み込み処理を開始しました")
-        .setTimestamp();
-
-      interaction.reply({ embeds: [embed] });
-
-      await GatyaLoad();
-    }
-
-  if (commandName === 'gatyalist') {
-    try{
-      if (forumThreadsData.length === 0) {
-        return interaction.reply({ content: '❌ ガチャデータが読み込まれていません', flags: MessageFlags.Ephemeral });
-      }
-
-      const embeds = forumThreadsData.map(thread => {
-        const msgList = thread.messages.map(m => m.probability ? `${m.text} [${m.probability}]` : m.text);
-        return new EmbedBuilder()
-          .setTitle(thread.title)
-          .setDescription(msgList.join('\n') || 'メッセージなし')
-          .setFooter({ text: `Reply Channel: ${thread.replyChannel || '未設定'}` })
-          .setColor(0xFFD700)
-          .setTimestamp();
-      });
-
-      // Embed は 1 回に最大 10 件まで
-      for (let i = 0; i < embeds.length; i += 10) {
-        await interaction.reply({ embeds: embeds.slice(i, i + 10), flags: MessageFlags.Ephemeral });
-      }
-    }catch(e){
-      interaction.reply("エラー:" + e);
-    }
-  }
-
-  // 環境変数がさわれないため直書き。飼育員ロール。by imme
-  if (commandName === 'imihubun') {
-
-  await interaction.deferReply();
-    if (!interaction.member.roles.cache.has(shiikurole)) {
-      await interaction.editReply({
-        content: '❌ このコマンドを使用する権限がありません'
-      });
-      return;
-    }
-  let wordData = null;
-  (async () => {
-    const res = await fetch('https://povo-43.github.io/imihubun/words.json');
-     wordData = await res.json();
-  })();
-
-  const channel = interaction.options.getChannel('channel');
-
-    if (!channel.isTextBased()) {
-      await interaction.editReply({
-        content: '❌ テキストチャンネルを指定してください'
-      });
-      return;
-    }
-
-
-  /* ===== チャンネル制限 ===== */
-  if (!ALLOWED_CHANNEL_IDS.includes(channel)) {
-    return interaction.editReply({
-      content: "❌ このコマンドは指定チャンネルでのみ使用できます。",
-      ephemeral: true
-    });
-  }
-
-  /* ===== チャンネル単位クールダウン ===== */
-  const now = Date.now();
-  const lastUsed = channelCooldowns.get(channel) ?? 0;
-
-  const remaining = CHANNEL_COOLDOWN_MS - (now - lastUsed);
-  if (remaining > 0) {
-    return interaction.editRreply({
-      content: `⏳ このチャンネルではあと **${Math.ceil(remaining / 1000)}秒** 待ってね`,
-      ephemeral: true
-    });
-  }
-
-  // クールダウン更新
-  channelCooldowns.set(channel, now);
-  
-    // テキストチャンネル確認
-
-    const footer = "\n-# By [意味不文ジェネレーター](<https://povo-43.github.io/imihubun>)";
-    const main_text = Math.random() > 0.5
-      ? (
-          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
-          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
-          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
-          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
-          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
-        ) + ' ' + (
-          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
-          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
-          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
-          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
-          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
-        )
-      : (
-          wordData.starts[Math.floor(Math.random() * wordData.starts.length)] +
-          wordData.subjects[Math.floor(Math.random() * wordData.subjects.length)] +
-          wordData.locations[Math.floor(Math.random() * wordData.locations.length)] +
-          wordData.actions[Math.floor(Math.random() * wordData.actions.length)] +
-          wordData.ends[Math.floor(Math.random() * wordData.ends.length)]
-        )
-   
-    await channel.send(main_text + footer);
-  
-    await interaction.editReply({content: `✅ <#${channel.id}> に送信しました`});
-  }
-
-  if (!interaction.replied && !interaction.deferred) {
-  interaction.reply({ content: '❌ エラーが発生しました', flags: 64 })
-  .catch(console.error);
-}
-
-    // /modal
-    if (commandName === "modal") {
-      await interaction.deferReply();
-        if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-          await interaction.editReply({ content: '権限がありません', ephemeral: true })
-          return;
-        }
-
-      const id = interaction.options.getString("id");
-
-      const fields = [];
-      for (let i = 1; i <= 5; i++) {
-        const name = interaction.options.getString(`name${i}`);
-        const type = interaction.options.getString(`type${i}`);
-        if (name && type) fields.push({ name, type });
-      }
-
-      await supabase.from("modals").insert({
-        id,
-        embed_title: interaction.options.getString("title"),
-        embed_description: interaction.options.getString("description"),
-        modal_title: interaction.options.getString("modaltitle"),
-        fields
-      });
-
-      const embed = new EmbedBuilder()
-        .setTitle(interaction.options.getString("title"))
-        .setDescription(interaction.options.getString("description"));
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`modal_open:${id}`)
-          .setLabel("回答する")
-          .setStyle(ButtonStyle.Primary)
-      );
-
-      interaction.editReply({ embeds: [embed], components: [row] });
-      return;
-    }
-
-    // /modalview
-    if (commandName === "modalview") {
-      await interaction.deferReply();
-      if (!interaction.memberPermissions.has(PermissionFlagsBits.ModerateMembers)) {
-        await interaction.editReply({ content: '権限がありません', ephemeral: true })
-        return;
-      }
-      const id = interaction.options.getString("id");
-      const csv = interaction.options.getBoolean("csv");
-
-      const { data: modal } = await supabase
-        .from("modals").select("*").eq("id", id).single();
-
-      const { data: responses } = await supabase
-        .from("modal_responses").select("*").eq("modal_id", id);
-
-      if (csv) {
-        const headers = ["username", ...modal.fields.map(f => f.name)];
-        const rows = responses.map(r =>
-          [r.username, ...modal.fields.map(f => r.values[f.name] ?? "")]
-            .map(v => `"${v}"`).join(",")
-        );
-
-        const csvData = [headers.join(","), ...rows].join("\n");
-        const file = new AttachmentBuilder(
-          Buffer.from(csvData),
-          { name: `${id}.csv` }
-        );
-
-        interaction.editReply({ files: [file] });
-        return;
-      }
-
-      return sendPage(interaction, modal, responses, 0);
-    }
-
-  // -----------------------
-  // /account info
-  // -----------------------
-  if (commandName === "account" && interaction.options.getSubcommand() === "info") {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
-    const target = interaction.options.getUser("user") || interaction.user;
-
-    const acc = await getAccount(target.id);
-    if (!acc)
-      return interaction.editReply({
-        content: "このユーザーはまだアカウントありません！",
-        flags: MessageFlags.Ephemeral
-      });
-
-    return interaction.editReply({
-      embeds: [
-        {
-          title: `${target.username} のアカウント情報`,
-          fields: [
-            { name: "XP", value: `${acc.xp}`, inline: true },
-            { name: "VC XP", value: `${acc.vcxp}`, inline: true },
-            { name: "Level", value: `${acc.level}`, inline: true },
-            { name: "VC Level", value: `${acc.vclevel}`, inline: true },
-            {
-              name: "SNS",
-              value: Object.keys(acc.sns || {}).length
-                ? "```\n" + JSON.stringify(acc.sns, null, 2) + "\n```"
-                : "未設定"
-            }
-          ]
-        }
-      ]
-    });
-  }
-
-  // -----------------------
-  // /account settings
-  // -----------------------
-  if (commandName === "account" && interaction.options.getSubcommand() === "settings") {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const set = interaction.options.getString("set");
-    const type = interaction.options.getString("type");
-    const value = interaction.options.getString("value");
-
-    const err = await setSNS(interaction.user.id, type, value);
-    if (err.error)
-      return interaction.editReply("設定できませんでした…🥲");
-
-    return interaction.editReply(`SNS **${type}** を **${value}** に設定したよ！`);
-  }
-
-
-  //==================================================
-  // /admin account 系
-  //==================================================
- try{
-  if (commandName === "admin") {
-
-    // アカウント作成
-    if (sub === "account-create") {
-      await interaction.deferReply({ ephemeral: false });
-      const user = interaction.options.getUser("user");
-      const res = await createAccount(user.id);
-
-      if (res.error === "AccountAlreadyExists")
-        return interaction.editReply("そのユーザーはもう登録済みだよ！");
-
-      return interaction.editReply(`アカウント作成完了！`);
-    }
-
-    // アカウント削除
-    if (sub === "account-delete") {
-      await interaction.deferReply({ ephemeral: false });
-      const user = interaction.options.getUser("user");
-      await deleteAccount(user.id);
-      return interaction.editReply("削除完了！");
-    }
-
-    // アカウント移行
-    if (sub === "account-transfer") {
-      await interaction.deferReply({ ephemeral: false });
-
-      const oldUser = interaction.options.getUser("old");
-      const newUser = interaction.options.getUser("new");
-
-      const res = await transferAccount(oldUser.id, newUser.id);
-
-      if (res.error)
-        return interaction.editReply(`エラー: ${res.error}`);
-
-      return interaction.editReply("アカウント移行完了したよ！");
-    }
-
-    // XP操作
-    if (sub === "account-xp") {
-      await interaction.deferReply({ ephemeral: false });
-      const user = interaction.options.getUser("user");
-      const type = interaction.options.getString("type");
-      const value = interaction.options.getInteger("value");
-
-      await modifyXP(user.id, type, value);
-      return interaction.editReply(`XP を ${type} で ${value} 変更したよ！`);
-    }
-
-    // Level操作
-    if (sub === "account-level") {
-      await interaction.deferReply({ ephemeral: false });
-      const user = interaction.options.getUser("user");
-      const type = interaction.options.getString("type");
-      const value = interaction.options.getInteger("value");
-
-      await modifyLevel(user.id, type, value);
-      return interaction.editReply(`Level を ${type} で ${value} 変更したよ！`);
-    }
-}
-  } catch (err) {
-    console.error("interaction error:", err);
- }
-try{
-    // /record 系かチェック
-    if (commandName === "record") {
-      // ここでサブコマンドを呼ぶのはOK（record はサブコマンド定義済み）
-
-      if (sub === "start") {
-        // 実処理は record.js に丸投げ
-        console.log("[DEBUG] sub発火OK");
-        const res = await startRecord(interaction); // startRecord は interaction.editReply を内部で呼ぶ設計でもOK
-        // もし startRecord が結果を返すなら editReply で反映
-        if (res && typeof res === "string") {
-          await interaction.editReply(res);
-        } else {
-          await interaction.editReply("録音開始処理を実行したよ。");
-        }
-        return;
-      }
-
-      if (sub === "stop") {
-        const res = await stopRecord(interaction);
-        if (res && typeof res === "string") {
-          await interaction.editReply(res);
-        } else {
-          await interaction.editReply("録音停止したよ。");
-        }
-        return;
-      }
-
-      // 未対応サブコマンド
-      await interaction.editReply("未対応のサブコマンドだよ。");
-    }
-  } catch (err) {
-    console.error("interaction error:", err);
-    // 既に defer してるかどうかで返信方法を切り替える
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply("エラーが発生したよ。管理者に確認してね。");
-    } else {
-      await interaction.reply({ content: "エラーが発生したよ。", flags: MessageFlags.Ephemeral });
-    }
-    // 追加: ここで errorReporter に投げても良い
-  }
-if (commandName === "createaccount") {
-    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({
-            content: "🚫 このコマンドは管理者専用だよ〜！",
-            flags: MessageFlags.Ephemeral
-        });
-    }
-
-    try {
-        await interaction.deferReply();
-
-        const targetUser = interaction.options.getUser("user");
-        await createUserAccount(targetUser.id);
-
-        await interaction.editReply(
-            `🎉 **${targetUser.username}** のアカウント作ったよ！`
-        );
-
-    } catch (error) {
-        console.error("❌ createaccount実行中にエラー:", error);
-
-        // defer が成功してるかどうかは関係なく fallback でOK
-        try {
-            await interaction.followUp({
-                content: "⚠ エラーが起きたかも…！もう一度試してみてね！",
-                flags: MessageFlags.Ephemeral
-            });
-        } catch {}
-    }
-}
-
-    // -----------------------------------
-    // deleteaccount
-    // -----------------------------------
-    if (commandName === "deleteaccount") {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: "🚫 管理者じゃないとダメだよ！", flags: MessageFlags.Ephemeral });
-        }
-
-        try {
-            await interaction.deferReply();
-
-            const targetUser = interaction.options.getUser("user");
-            await deleteUserAccount(targetUser.id);
-
-            await interaction.editReply(
-                `🗑️ **${targetUser.username}** のアカウント消したよ！`
-            );
-        } catch (err) {
-            console.error(err);
-            await interaction.followUp({ content: "⚠ エラーが起きたよ…", flags: MessageFlags.Ephemeral });
-        }
-    }
-
-    // -----------------------------------
-    // transferaccount
-    // -----------------------------------
-    if (commandName === "transferaccount") {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: "🚫 権限足りないよ！", flags: MessageFlags.Ephemeral });
-        }
-
-        try {
-            await interaction.deferReply();
-
-            const fromUser = interaction.options.getUser("from");
-            const toUser = interaction.options.getUser("to");
-
-            await transferUserAccount(fromUser.id, toUser.id);
-
-            await interaction.editReply(
-                `🔁 **${fromUser.username} → ${toUser.username}** にデータ移行したよ！`
-            );
-        } catch (err) {
-            console.error(err);
-            await interaction.followUp({ content: "⚠ エラーが起きたよ…", flags: MessageFlags.Ephemeral });
-        }
-    }
-
-    // -----------------------------------
-    // myxp
-    // -----------------------------------
-if (commandName === "myxp") {
-    try {
-        await interaction.deferReply();
-
-        const user = await fetchUserAccount(interaction.user.id);
-
-        if (!user) {
-            await interaction.editReply("まだアカウントがないみたいだよ");
-            return;
-        }
-
-        // text + voice 合算レベルにしたいならこれ
-        const totalXp = user.text_xp + user.voice_xp;
-        const level = calculateUserLevel(totalXp);
-
-        await interaction.editReply(
-            `🌱 **${interaction.user.username} のステータス**\n` +
-            `📝 Text XP: **${user.text_xp}** (Lv.${user.text_level})\n` +
-            `🎤 Voice XP: **${user.voice_xp}** (Lv.${user.voice_level})\n` +
-            `🌟 合計レベル: **${level}**`
-        );
-    } catch (err) {
-        console.error(err);
-        await interaction.followUp({ content: "⚠ エラーが起きたよ…", flags: MessageFlags.Ephemeral });
-    }
-}
-  if (commandName === 'gachas') 
-  // ---------- Button ----------
-  if (interaction.isButton()) {
-    const [type, id, page] = interaction.customId.split(":");
-
-    // モーダル表示
-    if (type === "modal_open") {
-      const { data: modal } = await supabase
-        .from("modals").select("*").eq("id", id).single();
-
-      const modalUI = new ModalBuilder()
-        .setCustomId(`modal_submit:${id}`)
-        .setTitle(modal.modal_title);
-
-      modal.fields.forEach((f, i) => {
-        modalUI.addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId(`field_${i}`)
-              .setLabel(f.name)
-              .setStyle(
-                f.type === "SHORT"
-                  ? TextInputStyle.Short
-                  : TextInputStyle.Paragraph
-              )
-          )
-        );
-      });
-
-      await interaction.showModal(modalUI);
-      return;
-    }
-
-    // ページング
-    if (type === "modal_page") {
-      const { data: modal } = await supabase
-        .from("modals").select("*").eq("id", id).single();
-
-      const { data: responses } = await supabase
-        .from("modal_responses").select("*").eq("modal_id", id);
-
-      sendPage(interaction, modal, responses, Number(page));
-      return;
-    }
-  }
-
-  // ---------- Modal Submit ----------
-  if (interaction.isModalSubmit()) {
-    const id = interaction.customId.split(":")[1];
-
-    const { data: modal } = await supabase
-      .from("modals").select("*").eq("id", id).single();
-
-    const values = {};
-    modal.fields.forEach((f, i) => {
-      values[f.name] = interaction.fields.getTextInputValue(`field_${i}`);
-    });
-
-    await supabase.from("modal_responses").insert({
-      modal_id: id,
-      user_id: interaction.user.id,
-      username: interaction.user.username,
-      values
-    });
-
-    await interaction.reply({
-      content: "送信完了！",
-      ephemeral: true
-    });
-    return;
-  }
-
-const PER_PAGE = 20;
-
-async function sendPage(interaction, modal, responses, page) {
-  const start = page * PER_PAGE;
-  const slice = responses.slice(start, start + PER_PAGE);
-
-  const embed = new EmbedBuilder()
-    .setTitle(modal.modal_title)
-    .setDescription(
-      ["ユーザー名", ...modal.fields.map(f => f.name)].join(" | ")
-    );
-
-  slice.forEach(r => {
-    embed.addFields({
-      name: "\u200b",
-      value: [
-        r.username,
-        ...modal.fields.map(f => r.values[f.name] ?? "-")
-      ].join(" | ")
-    });
-  });
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`modal_page:${modal.id}:${page - 1}`)
-      .setLabel("◀")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(page === 0),
-    new ButtonBuilder()
-      .setCustomId(`modal_page:${modal.id}:${page + 1}`)
-      .setLabel("▶")
-      .setStyle(ButtonStyle.Secondary)
-      .setDisabled(start + PER_PAGE >= responses.length)
-  );
-
-  if (interaction.replied || interaction.deferred) {
-    return interaction.update({ embeds: [embed], components: [row] });
-  } else {
-    return interaction.reply({ embeds: [embed], components: [row] });
-  }
-}
-
-}
 });
       
+processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
+setInterval(() => {
+  processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
+}, 30_000);
+
 /* 
   ガチャのデータ読み込み
 */
