@@ -95,7 +95,6 @@ export async function insertAuthLog(
 /* =====================
    MODERATION LOGS
 ===================== */
-
 export async function insertModerationLog({
   guildId,
   targetUserId,
@@ -104,14 +103,17 @@ export async function insertModerationLog({
   reason = null,
   durationMs = null
 }) {
+  // デバッグ用：ここで null になっていないか確認
+  console.log("DB Insert Logic:", { guildId, targetUserId, action });
+
   const { error } = await supabase
     .from("moderation_logs")
     .insert({
-      guild_id: guildId,
-      target_user_id: targetUserId,
+      guild_id: guildId,            // ここを確実に渡す
+      target_user_id: targetUserId, // ここを確実に渡す
       moderator_user_id: moderatorUserId,
-      action,
-      reason,
+      action: action,
+      reason: reason,
       duration_ms: durationMs,
       created_at: new Date().toISOString()
     });
