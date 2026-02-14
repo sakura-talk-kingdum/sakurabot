@@ -44,6 +44,7 @@ import {
   upsertUserAuth,
   findUserByIPandUA,
   insertAuthLog,
+  insertModerationLog,
   getPinnedByChannel,
   upsertPinned,
   deletePinned
@@ -159,6 +160,100 @@ export async function logModerationAction({ guild, action, target, moderator, re
 
   try {
     const channel = await guild.channels.fetch(DISCORD_LOG_CHANNEL_ID);
+    if (!channel?.isTextBased()) return;
+
+    const fields = [
+      { name: "Action", value: action, inline: true },
+      { name: "Target", value: `${target?.tag ?? "Unknown"} (${target?.id ?? "-"})`, inline: true },
+      { name: "Moderator", value: moderator ? `${moderator.tag} (${moderator.id})` : "Unknown", inline: true }
+    ];
+
+    if (durationMs) {
+      fields.push({ name: "Duration", value: formatDurationMs(durationMs), inline: true });
+    }
+
+    if (reason) {
+      fields.push({ name: "Reason", value: reason.slice(0, 1024) });
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("🛡️ Moderation Log")
+      .setColor(0xff8855)
+      .addFields(fields)
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch (err) {
+    console.error("mod log send failed:", err);
+  }
+}
+
+async function fetchLatestAuditLog(guild, type) {
+  try {
+    const logs = await guild.fetchAuditLogs({ type, limit: 1 });
+    return logs.entries.first() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function formatDurationMs(ms) {
+  if (!ms || ms <= 0) return "0秒";
+  const totalSec = Math.floor(ms / 1000);
+  const day = Math.floor(totalSec / 86400);
+  const hour = Math.floor((totalSec % 86400) / 3600);
+  const min = Math.floor((totalSec % 3600) / 60);
+  const sec = totalSec % 60;
+
+  return [
+    day ? `${day}日` : null,
+    hour ? `${hour}時間` : null,
+    min ? `${min}分` : null,
+    sec ? `${sec}秒` : null
+  ].filter(Boolean).join(" ");
+}
+
+async function shouldSkipModerationTarget(guild, targetId, targetMember) {
+  if (!shiikurole || !guild) return false;
+
+  if (targetMember?.roles?.cache?.has(shiikurole)) {
+    return true;
+  }
+
+  if (!targetId) return false;
+
+  try {
+    const member = await guild.members.fetch(targetId);
+    return member.roles.cache.has(shiikurole);
+  } catch {
+    return false;
+  }
+}
+
+export async function logModerationAction({ guild, action, target, moderator, reason, durationMs, targetMember }) {
+  if (!guild || !target?.id) return;
+
+  if (await shouldSkipModerationTarget(guild, target.id, targetMember)) {
+    return;
+  }
+
+  try {
+    await insertModerationLog({
+      guildId: guild.id,
+      targetUserId: target.id,
+      moderatorUserId: moderator?.id ?? null,
+      action,
+      reason: reason ?? null,
+      durationMs: durationMs ?? null
+    });
+  } catch (err) {
+    console.error("mod log db insert failed:", err);
+  }
+
+  if (!DISCORD_MOD_LOG_CHANNEL_ID) return;
+
+  try {
+    const channel = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
     if (!channel?.isTextBased()) return;
 
     const fields = [
@@ -531,7 +626,8 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     target: newMember.user,
     moderator: entry?.executor ?? null,
     reason: entry?.reason ?? null,
-    durationMs: isTimeoutSet ? Math.max(newTs - Date.now(), 0) : null
+    durationMs: isTimeoutSet ? Math.max(newTs - Date.now(), 0) : null,
+    targetMember: newMember
   });
 });
 
@@ -557,7 +653,8 @@ client.on("guildMemberRemove", async member => {
     action: "KICK",
     target: member.user,
     moderator: entry.executor ?? null,
-    reason: entry.reason ?? null
+    reason: entry.reason ?? null,
+    targetMember: member
   });
 });
       

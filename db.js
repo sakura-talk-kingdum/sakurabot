@@ -91,6 +91,34 @@ export async function insertAuthLog(
   if (error) throw error;
 }
 
+
+/* =====================
+   MODERATION LOGS
+===================== */
+
+export async function insertModerationLog({
+  guildId,
+  targetUserId,
+  moderatorUserId,
+  action,
+  reason = null,
+  durationMs = null
+}) {
+  const { error } = await supabase
+    .from("moderation_logs")
+    .insert({
+      guild_id: guildId,
+      target_user_id: targetUserId,
+      moderator_user_id: moderatorUserId,
+      action,
+      reason,
+      duration_ms: durationMs,
+      created_at: new Date().toISOString()
+    });
+
+  if (error) throw error;
+}
+
 /* =====================
    PINNED MESSAGES
 ===================== */
