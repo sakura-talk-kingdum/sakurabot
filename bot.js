@@ -557,7 +557,6 @@ client.on("guildMemberRemove", async member => {
     moderator: entry.executor ?? null,
     reason: entry.reason ?? null
   });
-  });
 });
       
 /* 
