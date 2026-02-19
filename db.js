@@ -122,54 +122,6 @@ export async function insertModerationLog({
 
 /* =====================
    TIMEOUT CONTINUATIONS
-===================== */
-
-export async function upsertTimeoutContinuation({
-  guildId,
-  targetUserId,
-  reason = null,
-  targetUntil,
-  nextApplyAt
-}) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .upsert(
-      {
-        guild_id: guildId,
-        target_user_id: targetUserId,
-        reason,
-        target_until: targetUntil,
-        next_apply_at: nextApplyAt,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "guild_id,target_user_id" }
-    );
-
-  if (error) throw error;
-}
-
-export async function deleteTimeoutContinuation(guildId, targetUserId) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .delete()
-    .eq("guild_id", guildId)
-    .eq("target_user_id", targetUserId);
-
-  if (error) throw error;
-}
-
-export async function listDueTimeoutContinuations(nowIso) {
-  const { data, error } = await supabase
-    .from("timeout_continuations")
-    .select("guild_id,target_user_id,reason,target_until,next_apply_at")
-    .lte("next_apply_at", nowIso)
-    .order("next_apply_at", { ascending: true })
-    .limit(100);
-
-  if (error) throw error;
-  return data ?? [];
-}
-
 /* =====================
    PINNED MESSAGES
 ===================== */
@@ -225,6 +177,26 @@ export async function upsertPinned(
   if (error) throw error;
 }
 
+export async function upsertTimeoutContinuation({ guild_id, target_user_id, reason, target_until, next_apply_at }) {
+  const { error } = await supabase
+    .from('timeout_continuations')
+    .upsert({
+      guild_id,
+      target_user_id,
+      reason,
+      target_until,
+      next_apply_at,
+      updated_at: new Date().toISOString()
+    }, {
+      // guild_id と target_user_id の組み合わせで重複を判断する場合
+      onConflict: 'guild_id,target_user_id' 
+    });
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function deletePinned(channel_id) {
   const { error } = await supabase
     .from("pinned_messages")
@@ -232,4 +204,27 @@ export async function deletePinned(channel_id) {
     .eq("channel_id", channel_id);
 
   if (error) throw error;
+}// 1. エラーの原因だった削除関数を定義・エクスポート
+export async function deleteTimeoutContinuation(guildId, userId) {
+  const { error } = await supabase
+    .from('timeout_continuations') // テーブル名が異なる場合はここを修正してください
+    .delete()
+    .match({ 
+      guild_id: guildId, 
+      target_user_id: userId 
+    });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function listDueTimeoutContinuations(now) {
+  const { data, error } = await supabase
+    .from('timeout_continuations')
+    .select('*')
+    .lt('next_apply_at', now); // 現在時刻より前のものを取得
+
+  if (error) throw error;
+  return data || [];
 }
