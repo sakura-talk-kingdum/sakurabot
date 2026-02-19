@@ -31,7 +31,7 @@ import {
   StreamType
 } from '@discordjs/voice';
 import ytdl from 'ytdl-core';
-import * as playdl from 'play-dl';
+import playdl from 'play-dl';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import si from 'systeminformation';
 import os from 'os';
@@ -243,6 +243,16 @@ export async function logModerationAction({ guild, action, target, moderator, re
 }
 
 async function scheduleTimeoutContinuation({ guildId, userId, reason, targetUntil, nextApplyAt }) {
+  if (!guildId || !userId || !targetUntil || !nextApplyAt) {
+    console.warn("timeout continuation skipped: missing required fields", {
+      guildId,
+      userId,
+      hasTargetUntil: Boolean(targetUntil),
+      hasNextApplyAt: Boolean(nextApplyAt)
+    });
+    return;
+  }
+
   try {
     await upsertTimeoutContinuation({
       guildId,
@@ -257,6 +267,8 @@ async function scheduleTimeoutContinuation({ guildId, userId, reason, targetUnti
 }
 
 async function clearTimeoutContinuation(guildId, userId) {
+  if (!guildId || !userId) return;
+
   try {
     await deleteTimeoutContinuation(guildId, userId);
   } catch (err) {
