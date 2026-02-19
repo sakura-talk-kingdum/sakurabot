@@ -109,7 +109,7 @@ function renderSet(s){
 
     <div>
       <input id="iname-${s.id}" placeholder="アイテム名">
-      <input id="idesc-${s.id}" placeholder="説明">
+      <input id="idescription-${s.id}" placeholder="説明">
       <input id="iamount-${s.id}" type="number" placeholder="個数">
       <select id="irarity-${s.id}">
         <option>common</option>
@@ -191,6 +191,7 @@ async function loadItems(setId){
     el.insertAdjacentHTML('beforeend', `
       <div class="item">
         <input value="${i.name}" id="iname-${i.id}">
+        <input value="${i.description}" id="idescription-${i.id}">
         <input value="${i.amount}" type="number" id="iamount-${i.id}">
         <select id="irarity-${i.id}">
           ${['common','uncommon','rare','epic','legend','superlegend']
@@ -205,6 +206,7 @@ async function loadItems(setId){
 
 async function addItem(setId){
   const name = $(`iname-${setId}`).value.trim()
+  const description = $(`idescription-${setId}`).value.trim()
   const amount = Number($(`iamount-${setId}`).value)
   const rarity = $(`irarity-${setId}`).value
   if(!name || amount<=0) return alert('不正')
@@ -213,7 +215,7 @@ async function addItem(setId){
     method:'POST',
     credentials:'include',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({ name, amount, rarity })
+    body:JSON.stringify({ name, description, amount, rarity })
   })
   loadItems(setId)
 }
@@ -221,9 +223,11 @@ async function addItem(setId){
 async function saveItem(setId,itemId){
   const body = {}
   const name = $(`iname-${itemId}`).value.trim()
+  const description = $(`idescription-${itemId}`).value.trim()
   const amount = Number($(`iamount-${itemId}`).value)
   const rarity = $(`irarity-${itemId}`).value
   if(name) body.name = name
+  if(description) body.description = description
   if(amount>0) body.amount = amount
   if(rarity) body.rarity = rarity
 
