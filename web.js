@@ -384,7 +384,7 @@ app.get("/api", cors(), async (req, res) => {
     const guildRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD_ID}?with_counts=true`, {
       headers: { Authorization: `Bot ${DISCORD_TOKEN}` }
     });
-    console.log("Response Headers:", Object.fromEntries(response.headers.entries);
+    console.log("Response Headers:", Object.fromEntries(response.headers.entries));
     if (!guildRes.ok) throw new Error(`Guild fetch failed: ${guildRes.status}`);
     const guildData = await guildRes.json();
 
