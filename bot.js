@@ -1051,7 +1051,34 @@ if (!selectedRarity) return
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
-  
+
+  if (!message.guild) {
+    if (message.content.trim() !== "s.toleft") return;
+
+    try {
+      const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+      const member = await guild.members.fetch(message.author.id);
+
+      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        await message.reply("この操作を実行する権限がありません。");
+        return;
+      }
+
+      if (!member.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
+        await message.reply("現在タイムアウトされていません。");
+        return;
+      }
+
+      await member.timeout(null, "DM command: s.toleft");
+      await message.reply("タイムアウトを解除しました。");
+    } catch (err) {
+      console.error("s.toleft processing failed:", err);
+      await message.reply("処理に失敗しました。").catch(() => {});
+    }
+    return;
+  }
+
+  // shard 0 のみ副作用OK
   const isShard0 = !client.shard || client.shard.ids[0] === 0;
 
   if (isShard0) {
