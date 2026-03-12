@@ -1,4 +1,3 @@
-// db.js
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -116,96 +115,15 @@ export async function deleteTimeoutContinuation(guildId, targetUserId) {
   const { error } = await supabase
     .from("timeout_continuations")
     .delete()
-    .match({ 
-      guild_id: guildId, 
-      target_user_id: targetUserId 
-    });
+    .eq("guild_id", guildId)
+    .eq("target_user_id", targetUserId);
   if (error) throw error;
 }
 
-export async function listDueTimeoutContinuations(nowIso) {
+export async function listDueTimeoutContinuations(nowIso = new Date().toISOString()) {
   const { data, error } = await supabase
     .from("timeout_continuations")
     .select("*")
-    .lte("next_apply_at", nowIso)
-    .order("next_apply_at", { ascending: true })
-    .limit(100);
-
-  if (error) throw error;
-  return data ?? [];
-}
-
-
-/* =====================
-   MODERATION LOGS
-===================== */
-
-export async function insertModerationLog({
-  guildId,
-  targetUserId,
-  moderatorUserId,
-  action,
-  reason = null,
-  durationMs = null
-}) {
-  const { error } = await supabase
-    .from("moderation_logs")
-    .insert({
-      guild_id: guildId,
-      target_user_id: targetUserId,
-      moderator_user_id: moderatorUserId,
-      action,
-      reason,
-      duration_ms: durationMs,
-      created_at: new Date().toISOString()
-    });
-
-  if (error) throw error;
-}
-
-
-/* =====================
-   TIMEOUT CONTINUATIONS
-===================== */
-
-export async function upsertTimeoutContinuation({
-  guildId,
-  targetUserId,
-  reason = null,
-  targetUntil,
-  nextApplyAt
-}) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .upsert(
-      {
-        guild_id: guildId,
-        target_user_id: targetUserId,
-        reason,
-        target_until: targetUntil,
-        next_apply_at: nextApplyAt,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "guild_id,target_user_id" }
-    );
-
-  if (error) throw error;
-}
-
-export async function deleteTimeoutContinuation(guildId, targetUserId) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .delete()
-    .eq("guild_id", guildId)
-    .eq("target_user_id", targetUserId);
-
-  if (error) throw error;
-}
-
-export async function listDueTimeoutContinuations(nowIso) {
-  const { data, error } = await supabase
-    .from("timeout_continuations")
-    .select("guild_id,target_user_id,reason,target_until,next_apply_at")
     .lte("next_apply_at", nowIso)
     .order("next_apply_at", { ascending: true })
     .limit(100);
