@@ -14,7 +14,8 @@ const totalShards = 2;
 
 const manager = new ShardingManager("./bot.js", {
   token: process.env.DISCORD_BOT_TOKEN,
-  totalShards
+  totalShards,
+  mode: 'worker'
 });
 
 manager.on("shardCreate", shard => {
