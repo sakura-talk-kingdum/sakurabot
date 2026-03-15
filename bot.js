@@ -1075,7 +1075,13 @@ if (!selectedRarity) return
 client.on("messageCreate", async (message) => {
 
   if (message.author.bot) return;
-
+  
+  /* =====================
+     SHARD SAFE SIDE EFFECT
+  ===================== */
+  const isShard0 = !client.shard || client.shard.ids.includes(0);
+  if (!isShard0) return;
+  
   /* =====================
      DM COMMAND
   ===================== */
@@ -1123,12 +1129,6 @@ method: DM command`
     }
     return;
   }
-
-  /* =====================
-     SHARD SAFE SIDE EFFECT
-  ===================== */
-  const isShard0 = !client.shard || client.shard.ids.includes(0);
-  if (!isShard0) return;
 
   /* ===== ガチャ処理（あっても無くてもOK） ===== */
     const { data: sets } = await supabase
