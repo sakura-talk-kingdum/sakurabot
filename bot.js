@@ -1146,7 +1146,7 @@ method: DM command`
         break;
       }
     }
-  }
+  
 
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);
