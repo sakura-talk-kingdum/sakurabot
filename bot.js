@@ -598,7 +598,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     
     await rest.put(
       Routes.applicationGuildsCommands(DISCORD_CLIENT_ID,"1400830654949753023"),
-      { body: [] }
+      { body }
     );
 
     console.log("✅ コマンド登録完了");
