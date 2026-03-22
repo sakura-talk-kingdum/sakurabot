@@ -1089,7 +1089,7 @@ client.on("messageCreate", async (message) => {
 
     const cmd = message.content.trim();
 
-    if (cmd !== "s.toleft") return;
+    if (cmd === "s.toleft") {
 
     try {
 
@@ -1128,7 +1128,48 @@ method: DM command`
     }
     return;
   }
+    if (cmd === "h.toleft") {
 
+    try {
+      const HIMASABA_ID = "1400830654949753023";
+      const HIMASABA_MOD_ID = "1400885372480913458";
+      const guild = await client.guilds.fetch(HIMASABA_ID);
+
+      const member = await guild.members.fetch(message.author.id);
+
+      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        await message.reply("この操作を実行する権限がありません。");
+        return;
+      }
+
+      if (!member.communicationDisabledUntilTimestamp ||
+          member.communicationDisabledUntilTimestamp <= Date.now()) {
+
+        await message.reply("現在タイムアウトされていません。");
+        return;
+      }
+
+      await member.timeout(null, "DM command self release");
+      await message.reply("✅ タイムアウトを解除しました。");
+      /* MOD LOG */
+      const mod = await guild.channels.fetch(HIMASABA_MOD);
+
+      if (mod?.isTextBased()) {
+        mod.send(
+`🔓 Timeout Released
+user: ${message.author.tag}
+id: ${message.author.id}
+method: DM command`
+        );
+      }
+    } catch (err) {
+      console.error("h.toleft failed:", err);
+      await message.reply("処理に失敗しました。").catch(()=>{});
+    }
+    return;
+  }
+  }   
+  
   /* ===== ガチャ処理（あっても無くてもOK） ===== */
     const { data: sets } = await supabase
       .from('gacha_sets')
