@@ -594,10 +594,11 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     const body = commands.map(cmd =>
       typeof cmd.toJSON === "function" ? cmd.toJSON() : cmd
     );
-
+    console.log(body);
+    
     await rest.put(
-      Routes.applicationCommands(DISCORD_CLIENT_ID),
-      { body }
+      Routes.applicationGuildsCommands(DISCORD_CLIENT_ID,"1400830654949753023"),
+      { body: [] }
     );
 
     console.log("✅ コマンド登録完了");
