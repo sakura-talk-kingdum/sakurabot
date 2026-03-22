@@ -596,9 +596,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     );
 
     await rest.put(
-      Routes.applicationGuildCommands(
-        DISCORD_CLIENT_ID
-      ),
+      Routes.applicationCommands(DISCORD_CLIENT_ID),
       { body }
     );
 
@@ -610,7 +608,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
   });
 
   }
-})();
+});
 
 // pinned table check note: with Supabase you'd usually create tables via migration
 async function ensurePinnedTableExists() {
