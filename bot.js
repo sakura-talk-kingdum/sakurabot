@@ -597,8 +597,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
     await rest.put(
       Routes.applicationGuildCommands(
-        DISCORD_CLIENT_ID,
-        DISCORD_GUILD_ID
+        DISCORD_CLIENT_ID
       ),
       { body }
     );
