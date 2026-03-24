@@ -1088,6 +1088,37 @@ client.on("messageCreate", async (message) => {
 
     const cmd = message.content.trim();
 
+    if (cmd === "/unselfto") {
+      try {
+        const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+        const member = await guild.members.fetch(message.author.id);
+
+        if (!member.communicationDisabledUntilTimestamp ||
+            member.communicationDisabledUntilTimestamp <= Date.now()) {
+          await message.reply("現在タイムアウトされていません。");
+          return;
+        }
+
+        await member.timeout(null, "DM command /unselfto");
+        await clearTimeoutContinuation(guild.id, message.author.id);
+        await message.reply("✅ タイムアウトを解除しました。");
+
+        const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+        if (mod?.isTextBased()) {
+          mod.send(
+`🔓 Timeout Released
+user: ${message.author.tag}
+id: ${message.author.id}
+method: DM /unselfto`
+          );
+        }
+      } catch (err) {
+        console.error("/unselfto failed:", err);
+        await message.reply("処理に失敗しました。").catch(()=>{});
+      }
+      return;
+    }
+
     if (cmd === "s.toleft") {
 
     try {
