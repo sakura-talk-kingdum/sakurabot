@@ -114,6 +114,14 @@ export const client = new Client({
   }
 });
 
+function isPrimaryShard() {
+  if (globalThis.__SAKURA_SHARD_ROLE__) {
+    return globalThis.__SAKURA_SHARD_ROLE__.isPrimary;
+  }
+
+  return !client.shard || client.shard.ids[0] === 0;
+}
+
 const DISCORD_TIMEOUT_MAX_MS = 28 * 24 * 60 * 60 * 1000;
 
 function parseDurationDetailed(str) {
@@ -588,6 +596,8 @@ ip: ${ipHash?.slice(0,8) ?? "unknown"}`
 const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
 (async () => {
+  if (!isPrimaryShard()) return;
+
   try {
     console.log("スラッシュコマンド登録中...");
 
@@ -605,8 +615,8 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
   } catch (err) {
     console.error("❌ コマンド登録失敗:", err);
     commands.forEach(cmd => {
-    console.error('壊れてるコマンド:', cmd.name, err);
-  });
+      console.error('壊れてるコマンド:', cmd.name, err);
+    });
 
   }
 });
@@ -623,7 +633,9 @@ async function ensurePinnedTableExists() {
     console.warn('pinned_messages table check unexpected error', e);
   }
 }
-ensurePinnedTableExists();
+if (isPrimaryShard()) {
+  ensurePinnedTableExists();
+}
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
@@ -731,10 +743,12 @@ client.on("guildMemberRemove", async member => {
   });
 });
       
-processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
-setInterval(() => {
-  processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
-}, 30_000);
+if (isPrimaryShard()) {
+  processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
+  setInterval(() => {
+    processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
+  }, 30_000);
+}
 
 /* 
   ガチャのデータ読み込み
@@ -1078,6 +1092,12 @@ if (!selectedRarity) return
 client.on("messageCreate", async (message) => {
 
   if (message.author.bot) return;
+
+  if (!message.guild) {
+    if (message.content.trim() !== "s.toleft") return;
+
+    try {
+      const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
   
   /* =====================
      SHARD SAFE SIDE EFFECT
@@ -1137,9 +1157,7 @@ method: DM /unselfto`
         return;
       }
 
-      if (!member.communicationDisabledUntilTimestamp ||
-          member.communicationDisabledUntilTimestamp <= Date.now()) {
-
+      if (!member.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
         await message.reply("現在タイムアウトされていません。");
         return;
       }
@@ -1308,6 +1326,7 @@ client.once('ready', async () => {
      status: 'online'
   });
 
+if (isPrimaryShard()) {
 setInterval(async () => {
   try {
     const now = new Date();
@@ -1356,6 +1375,7 @@ setInterval(async () => {
     console.error("Interval内エラー:", globalError);
   }
 }, 10_000);
+}
 
   setInterval(() => {
     const pingNow = Math.round(client.ws.ping);
