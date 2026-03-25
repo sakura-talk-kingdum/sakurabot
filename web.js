@@ -16,10 +16,6 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 
-// CSRF protection using cookies. This protects routes under /admins and /gachas.
-const csrfProtection = csurf({ cookie: true });
-app.use('/admins', csrfProtection);
-app.use('/gachas', csrfProtection);
 const PORT = process.env.PORT || 3000;
 
 /* =====================
@@ -144,55 +140,67 @@ app.get('/auth/', cors(), (req, res) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>さくら雑談王国認証ページ</title>
-<!-- Discord風フォント読み込み -->
 <link href="https://fonts.googleapis.com/css2?family=gg-sans:wght@400;700&display=swap" rel="stylesheet">
 <style>
   body {
     font-family: 'gg-sans', 'Segoe UI', sans-serif;
-    background: #262626; /* 濃い背景 */
-    color: #FFFFFF;       /* 文字白 */
+    background: radial-gradient(circle at top, #2f3136 0%, #1e1f22 55%, #111214 100%);
+    color: #fff;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
     margin: 0;
+    padding: 24px;
+  }
+
+  .card {
+    width: min(520px, 100%);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(4px);
   }
 
   h1 {
     text-align: center;
-    color: #FFFFFF;
+    margin: 0 0 8px;
+  }
+
+  p {
+    text-align: center;
+    margin: 0;
+    color: rgba(255, 255, 255, 0.8);
   }
 
   a.button {
-    display: inline-block;
-    padding: 15px 25px;
+    display: block;
+    text-align: center;
+    padding: 15px 20px;
     margin-top: 20px;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: bold;
-    color: #FFFFFF;
-    background: #60B6BF;
-    border-radius: 0;           /* 四角 */
-    border: 2px solid #FFFFFF;  /* 白ボーダー */
+    color: #fff;
+    background: linear-gradient(120deg, #5b6ef5, #8f5cf6);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.45);
     text-decoration: none;
-    box-shadow: 4px 4px 0 #FFFFFF; /* 右下に白影 */
+    box-shadow: 0 8px 18px rgba(91, 110, 245, 0.38);
     transition: 0.2s;
   }
 
   a.button:hover {
-    background: #BF73A4;
-    box-shadow: 4px 4px 0 #60B6BF; /* ホバー時に反転 */
-  }
-
-  .container {
-    text-align: center;
-    max-width: 400px;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(143, 92, 246, 0.45);
   }
 </style>
 </head>
 <body>
-  <div class="container">
+  <div class="card">
     <h1>さくら雑談王国認証ページへようこそ</h1>
+    <p>Discordアカウントでログインして、各種機能をご利用ください。</p>
     <a href="https://discord.com/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify" class="button">
       Discordで認証
     </a>
@@ -216,43 +224,61 @@ app.get('/', cors(), (req, res) => {
         body {
           font-family: 'Arial', sans-serif;
           margin: 0;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          background: #f0f2f5;
+          padding: 32px 16px;
+          background: linear-gradient(180deg, #eef3ff 0%, #f8fafc 100%);
+          color: #0f172a;
+        }
+        .container {
+          max-width: 920px;
+          margin: 0 auto;
         }
         header {
-          width: 100%;
           padding: 20px;
           text-align: center;
-          background: #5865F2;
+          background: linear-gradient(120deg, #5865F2, #7382ff);
           color: #fff;
           font-size: 1.5rem;
+          border-radius: 14px;
+          box-shadow: 0 10px 20px rgba(88, 101, 242, 0.25);
         }
-        main {
-          margin-top: 20px;
-          width: 90%;
-          max-width: 800px;
+        .card {
+          margin-top: 18px;
+          background: #fff;
+          border-radius: 14px;
+          box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+          padding: 20px;
         }
         iframe {
           width: 100%;
           border: none;
+          border-radius: 10px;
+          box-shadow: inset 0 0 0 1px #e2e8f0;
+          min-height: 160px;
+        }
+        .button {
+          display: inline-block;
+          margin-top: 8px;
+          background: #0f172a;
+          color: #fff;
+          border: none;
           border-radius: 8px;
-          box-shadow: 0 0 10px rgba(0,0,0,0.2);
+          padding: 10px 14px;
+          text-decoration: none;
+          cursor: pointer;
         }
       </style>
     </head>
     <body>
-      <header>Bot稼働中🚀</header>
-      <main>
-        <h2>ライブステータス</h2>
-        <iframe id="statusFrame" src="https://script.google.com/macros/s/AKfycbwbh9oEmOWhNN9k_t86JmpKJZizPD_Ty4nSQxhusI1dJluwruXZET62nPgNupWVp9_p0A/exec" scrolling="no"></iframe>
-        <h3>利用規約等</h3>
-        <button onclick="location.href='https://kiyaku.bot.sakurahp.f5.si/'">利用規約&プライバリシーポリシーを見る</button>
-      </main>
+      <div class="container">
+        <header>Bot稼働中🚀</header>
+        <main class="card">
+          <h2>ライブステータス</h2>
+          <iframe id="statusFrame" src="https://script.google.com/macros/s/AKfycbwbh9oEmOWhNN9k_t86JmpKJZizPD_Ty4nSQxhusI1dJluwruXZET62nPgNupWVp9_p0A/exec" scrolling="no"></iframe>
+          <h3>利用規約等</h3>
+          <button class="button" onclick="location.href='https://kiyaku.bot.sakurahp.f5.si/'">利用規約&プライバリシーポリシーを見る</button>
+        </main>
+      </div>
       <script>
-        // GAS側からpostMessageで高さを受け取る
         const iframe = document.getElementById('statusFrame');
         window.addEventListener('message', (e) => {
           if (e.data.height) {
@@ -266,17 +292,12 @@ app.get('/', cors(), (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', cors(), async (req, res) => {
-  const code = req.query.code;
-  const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-  try {
-    const html = await handleOAuthCallback({ code, ip });
-    res.send(html);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('認証エラー');
-  }
+// client は Discord.js で初期化したインスタンス名に合わせてください
+app.get('/auth/callback', cors(), (req, res) => {
+    handleOAuthCallback(req, res, client); 
 });
+
+
 
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, cors(), async (req, res) => {
@@ -300,18 +321,20 @@ app.get("/admins", requireAdminuser, cors(), async (req, res) => {
 <meta charset="UTF-8">
 <title>運営管理 - 危険ユーザー</title>
 <style>
-body { font-family: sans-serif; background:#f5f5f5; padding:20px }
-h1 { margin-bottom:10px }
-table { border-collapse: collapse; width:100%; background:#fff }
-th, td { border:1px solid #ccc; padding:8px }
-th { background:#eee }
-form { margin-top:20px; background:#fff; padding:15px }
-input, textarea, button { width:100%; margin-top:5px; padding:8px }
-button { margin-top:10px }
+body { font-family: sans-serif; background:#eef2ff; padding:24px; color:#0f172a; }
+h1 { margin-bottom:12px }
+.panel { background:#fff; border-radius:12px; box-shadow:0 6px 14px rgba(0,0,0,0.08); padding:16px; }
+table { border-collapse: collapse; width:100%; background:#fff; border-radius:8px; overflow:hidden; }
+th, td { border-bottom:1px solid #e2e8f0; padding:10px; text-align:left; }
+th { background:#f8fafc }
+form { margin-top:20px; background:#fff; padding:15px; border-radius:10px; box-shadow:0 6px 14px rgba(0,0,0,0.08); }
+input, textarea, button { width:100%; margin-top:5px; padding:10px; border-radius:8px; border:1px solid #cbd5e1; box-sizing:border-box; }
+button { margin-top:12px; background:#4f46e5; color:#fff; border:none; font-weight:700; cursor:pointer; }
 </style>
 </head>
 <body>
 
+<div class="panel">
 <h1>⚠ 危険ユーザー一覧</h1>
 
 <table>
@@ -322,6 +345,7 @@ button { margin-top:10px }
 </tr>
 ${rows || "<tr><td colspan='3'>まだ登録なし</td></tr>"}
 </table>
+</div>
 
 <h2>➕ 追加</h2>
 <form method="POST" action="/admins/add">
@@ -359,10 +383,12 @@ app.get("/admins/callback", cors(), async (req, res) => {
     secure: true,
     sameSite: "lax",
     maxAge: 1000 * 60 * 60 * 24,
-  });
+});
 
   res.redirect("/admins");
-});
+  
+  });
+
 
 // ===== 追加処理 =====
 app.post(
@@ -395,6 +421,7 @@ app.get("/api", cors(), async (req, res) => {
     const guildRes = await fetch(`https://discord.com/api/v10/guilds/${GUILD_ID}?with_counts=true`, {
       headers: { Authorization: `Bot ${DISCORD_TOKEN}` }
     });
+    // console.log("Response Headers:", Object.fromEntries(response.headers.entries));
     if (!guildRes.ok) throw new Error(`Guild fetch failed: ${guildRes.status}`);
     const guildData = await guildRes.json();
 
@@ -608,12 +635,15 @@ app.get("/odai", cors(), (req, res) => {
   <meta charset="UTF-8">
   <title>今日のお題 管理ページ</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    h1 { color: #00bfff; }
-    input, button { font-size: 1em; padding: 5px; margin-top: 5px; }
+    body { font-family: sans-serif; padding: 24px; background:#f8fafc; color:#0f172a; }
+    .card { max-width: 760px; margin: 0 auto; background:#fff; border-radius:12px; padding:20px; box-shadow:0 8px 18px rgba(15,23,42,.08); }
+    h1 { color: #0284c7; margin-top:0; }
+    input, button { font-size: 1em; padding: 10px; margin-top: 8px; border-radius:8px; border:1px solid #cbd5e1; }
+    button { background:#0ea5e9; color:#fff; border:none; cursor:pointer; }
   </style>
 </head>
 <body>
+  <div class="card">
   <h1>今日のお題 追加ページ</h1>
 
   <h2>お題追加</h2>
@@ -639,6 +669,7 @@ app.get("/odai", cors(), (req, res) => {
     }
     fetchTopics();
   </script>
+  </div>
 </body>
 </html>
   `);
@@ -815,30 +846,46 @@ app.get('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['
   res.json(data)
 })
 
-app.post('/gachas/sets/:setId/items', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
-  const { setId } = req.params
+app.post('/gachas/sets/:setId/items', cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }), requireAuth, requireAdmin, 
+  async (req, res) => {
+    const { setId } = req.params;
+    const items = Array.isArray(req.body) ? req.body : [req.body];
 
-  // 配列で受け取る前提
-  const items = Array.isArray(req.body) ? req.body : [req.body]
+    try {
+      // そのセット内での現在の最大 display_id を取得
+      const { data: lastItem } = await supabase
+        .from('gacha_items')
+        .select('display_id')
+        .eq('set_id', setId)
+        .order('display_id', { ascending: false })
+        .limit(1)
+        .maybeSingle(); // single()だと0件の時エラーになるのでmaybeSingle
 
-  const insertData = items.map(item => ({
-    set_id: setId,
-    display_id: item.display_id,
-    name: item.name,
-    rarity: item.rarity,
-    amount: item.amount,
-    description: item.description ?? null
-  }))
+      let nextId = (lastItem?.display_id || 0) + 1;
 
-  const { error } = await supabase
-    .from('gacha_items')
-    .insert(insertData)
+      // 各アイテムに連番を割り当て
+      const insertData = items.map(item => ({
+        display_id: nextId++, // ここでセットごとの連番を付与
+        set_id: setId,
+        name: item.name,
+        rarity: item.rarity,
+        amount: item.amount,
+        description: item.description || null
+      }));
 
-  if (error) return res.status(500).json(error)
+      const { error } = await supabase
+        .from('gacha_items')
+        .insert(insertData);
 
-  await recalcProbabilitiesBySet(setId)
-  res.status(201).json({ ok: true })
-})
+      if (error) throw error;
+
+      await recalcProbabilitiesBySet(setId);
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: error.message });
+    }
+});
 
 app.patch('/gachas/sets/:setId/items/:itemId',  requireAuth,  requireAdmin,  cors({ origin: ['https://bot.sakurahp.f5.si'], credentials: true }),  async (req, res) => {
     const { setId, itemId } = req.params

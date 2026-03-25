@@ -19,7 +19,8 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  Collection
+  Collection,
+  Partials
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -49,7 +50,9 @@ import {
   listDueTimeoutContinuations,
   getPinnedByChannel,
   upsertPinned,
-  deletePinned
+  deletePinned,
+  addWarn
+
 } from "./db.js";
 import { commands } from "./lib/command/command.js";
 import { handleInteractionCreate } from "./lib/interaction/interactionCreate.js";
@@ -75,6 +78,7 @@ if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_RO
   throw new Error('環境変数が足りてないよ！');
 }
 
+const DISCORD_LOG_CHANNEL_ID = "1208987840462200882";
 const queues = new Map();
 
 const AI_CHANNEL_ID = "1450782867335549031";
@@ -93,9 +97,14 @@ export const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.DirectMessages,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
+  ],
+  partials: [
+    Partials.Channel, // DMチャンネルを認識するために必須
+    Partials.Message, // DMメッセージを認識するために必須
   ],
   rest: {
     rejectOnRateLimit: (info) => {
@@ -122,16 +131,15 @@ function parseDurationDetailed(str) {
   let usedMax = false
 
   for (const m of str.matchAll(regex)) {
-    // 日付指定（YYYY-MM-DD）の場合
     if (m[1]) {
-      const target = new Date(m[1]).setHours(0, 0, 0, 0)
-      const diff = target - Date.now()
-      if (diff > 0) ms += diff
-      continue
+      const target = new Date(m[1]).setHours(0, 0, 0, 0);
+      const diff = target - Date.now();
+      if (diff > 0) ms += diff;
+      continue;
     }
 
-    const v = Number(m[2])
-    const u = m[3].toLowerCase()
+    const v = m[2] ? Number(m[2]) : 1; // 数字がない場合は 1 とみなす
+    const u = m[3].toLowerCase();
     
     if (u === 'max') { ms += DISCORD_TIMEOUT_MAX_MS; usedMax = true; }
     else if (u === 'w') ms += v * 604800000
@@ -340,17 +348,21 @@ async function fetchLatestAuditLog(guild, type) {
 /* =====================
    RATE LIMIT
 ===================== */
+
 const rateMap = new Map();
-function checkRateLimit(ipHash) {
+
+function checkRateLimit(key) {
+
   const now = Date.now();
   const limit = 5;
-  const windowMs = 60_000;
+  const windowMs = 60000;
 
-  const arr = (rateMap.get(ipHash) || []).filter(
-    t => now - t < windowMs
-  );
+  const arr = (rateMap.get(key) || [])
+    .filter(t => now - t < windowMs);
+
   arr.push(now);
-  rateMap.set(ipHash, arr);
+
+  rateMap.set(key, arr);
 
   return arr.length <= limit;
 }
@@ -358,6 +370,7 @@ function checkRateLimit(ipHash) {
 /* =====================
    UTIL
 ===================== */
+
 function sha256(v) {
   return crypto.createHash("sha256").update(v).digest("hex");
 }
@@ -368,59 +381,34 @@ function normalizeIP(ip) {
   return ip;
 }
 
-function isGlobalIP(ip) {
-  if (!ip) return false;
+function extractIP(req) {
 
-  // IPv4 private
-  if (
-    ip.startsWith("10.") ||
-    ip.startsWith("192.168.") ||
-    ip.startsWith("172.16.") ||
-    ip === "127.0.0.1"
-  ) return false;
+  const fwd = req.headers["x-forwarded-for"];
 
-  // IPv6 local
-  if (
-    ip === "::1" ||
-    ip.startsWith("fe80") ||
-    ip.startsWith("fc") ||
-    ip.startsWith("fd")
-  ) return false;
-
-  return true;
-}
-
-function extractGlobalIP(ipString) {
-  if (!ipString) return null;
-
-  const ips = ipString
-    .split(",")
-    .map(i => normalizeIP(i.trim()))
-    .filter(Boolean);
-
-  for (const ip of ips) {
-    if (isGlobalIP(ip)) return ip;
+  if (fwd) {
+    return normalizeIP(fwd.split(",")[0].trim());
   }
-  return null;
+
+  return normalizeIP(req.socket.remoteAddress);
 }
 
 /* =====================
    VPN CHECK
 ===================== */
+
 async function checkVPN(ip) {
-  if (!isGlobalIP(ip)) return false;
 
   try {
+
     const res = await fetch(
-      `https://vpnapi.io/api/${ip}?key=${VPN_API_KEY}`,
-      { timeout: 5000 }
+      `https://vpnapi.io/api/${ip}?key=${process.env.VPN_API_KEY}`
     );
 
-    // API死んだら安全側
     if (!res.ok) return true;
 
     const data = await res.json();
-    const s = data?.security;
+
+    const s = data.security;
 
     return Boolean(
       s?.vpn ||
@@ -428,44 +416,49 @@ async function checkVPN(ip) {
       s?.tor ||
       s?.relay
     );
+
   } catch {
     return true;
   }
 }
 
 /* =====================
-   OAUTH CALLBACK
+   CALLBACK
 ===================== */
-export async function handleOAuthCallback(req, res) {
+
+export async function handleOAuthCallback(req, res, client) {
+
+  let ipHash = null;
+  let uaHash = null;
+
   try {
-    const { code } = req.query;
 
-    const forwarded = req.headers["x-forwarded-for"];
-    const rawIP = Array.isArray(forwarded)
-      ? forwarded[0]
-      : forwarded;
+    const code = req.query.code;
 
-    const ip =
-      extractGlobalIP(rawIP) ||
-      normalizeIP(req.socket.remoteAddress);
+    const ip = extractIP(req);
 
     const ua = req.headers["user-agent"] || "unknown";
 
-    if (!code || !ip) throw new Error("認証情報が不正です。もう一度Discord上でボタンを押し認証ページへ飛んでください。");
-    if (!isGlobalIP(ip)) throw new Error("有効なグローバルIPが取得できません");
-
-    const ipHash = sha256(ip);
-    const uaHash = sha256(ua);
-
-    /* --- rate limit (IP + UA) --- */
-    if (!checkRateLimit(`${ipHash}:${uaHash}`)) {
-      await insertAuthLog(null, "rate_limited", `IP:${ipHash}`);
-      throw new Error("認証試行が多すぎます。しばらく置いてからお試しください");
+    if (!code || !ip) {
+      throw new Error("認証情報が不足しています");
     }
 
-    /* --- token --- */
+    ipHash = sha256(ip);
+    uaHash = sha256(ua);
+
+    if (!checkRateLimit(`${ipHash}:${uaHash}`)) {
+
+      await insertAuthLog(null, ipHash, uaHash, "rate_limit", "too many");
+
+      throw new Error("認証試行が多すぎます");
+    }
+
+    /* TOKEN */
+
     const basic = Buffer
-      .from(`${DISCORD_CLIENT_ID}:${DISCORD_CLIENT_SECRET}`)
+      .from(
+        `${process.env.DISCORD_CLIENT_ID}:${process.env.DISCORD_CLIENT_SECRET}`
+      )
       .toString("base64");
 
     const tokenRes = await fetch(
@@ -479,15 +472,19 @@ export async function handleOAuthCallback(req, res) {
         body: new URLSearchParams({
           grant_type: "authorization_code",
           code,
-          redirect_uri: REDIRECT_URI
+          redirect_uri: process.env.REDIRECT_URI
         })
       }
     );
 
     const token = await tokenRes.json();
-    if (!token.access_token) throw new Error("認証コードをdiscordから受け取れませんでした。もう一度お試しください");
 
-    /* --- user --- */
+    if (!token.access_token) {
+      throw new Error("Discord token取得失敗");
+    }
+
+    /* USER */
+
     const userRes = await fetch(
       "https://discord.com/api/users/@me",
       {
@@ -498,26 +495,48 @@ export async function handleOAuthCallback(req, res) {
     );
 
     const user = await userRes.json();
-    if (!user?.id) throw new Error("ユーザー取得失敗");
 
-    /* --- VPN --- */
-    if (await checkVPN(ip)) {
-      await insertAuthLog(user.id, "vpn_detected", `IP:${ipHash}`);
-      throw new Error("VPN / Proxy が検知されました。adblockerなどが動いてる場合でも起こりうる場合があります。もう一度Discordの方でボタンを押し認証ページへ飛んでください。");
+    if (!user?.id) {
+      throw new Error("ユーザー取得失敗");
     }
 
-    /* --- sub account (IP + UA 両一致のみ) --- */
-    const owner = await findUserByIPandUA(ipHash, uaHash);
-    if (owner && owner !== user.id) {
+    /* VPN */
+
+    if (await checkVPN(ip)) {
+
       await insertAuthLog(
         user.id,
-        "sub_account_blocked",
-        `IP:${ipHash} UA:${uaHash}`
+        ipHash,
+        uaHash,
+        "vpn_detected",
+        "vpn or proxy"
       );
-      throw new Error("サブアカウントの可能性があります。もし前のアカウントが使えなくなった場合、サブアカウントは別途管理者に報告してください。");
+
+      await addWarn(user.id, 1);
+
+      throw new Error("VPN / Proxy が検知されました");
     }
 
-    /* --- DB --- */
+    /* SUB ACCOUNT */
+
+    const owner = await findUserByIPandUA(ipHash, uaHash);
+
+    if (owner && owner !== user.id) {
+
+      await insertAuthLog(
+        user.id,
+        ipHash,
+        uaHash,
+        "sub_account",
+        `owner:${owner}`
+      );
+
+      await addWarn(user.id, 2);
+
+      throw new Error("サブアカウントの可能性があります");
+    }
+
+    /* DB */
     await upsertUserAuth(
       user.id,
       user.username,
@@ -527,37 +546,47 @@ export async function handleOAuthCallback(req, res) {
 
     await insertAuthLog(
       user.id,
+      ipHash,
+      uaHash,
       "auth_success",
-      `IP:${ipHash}`
+      "ok"
     );
 
-    /* --- Discord role --- */
-    const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+    /* ROLE */
+    const guild = await client.guilds.fetch(process.env.GUILD_ID);
     const member = await guild.members.fetch(user.id);
 
-    if (!member.roles.cache.has(DISCORD_ROLE_ID)) {
-      await member.roles.add(DISCORD_ROLE_ID).catch(() => {});
+    if (!member.roles.cache.has(process.env.ROLE_ID)) {
+      await member.roles.add(process.env.ROLE_ID);
     }
+    
+    /* MOD LOG */
 
-    /* --- notify --- */
-    try {
-      const ch = await guild.channels.fetch(DISCORD_CHAT_CHANNEL_ID);
-      if (ch?.isTextBased()) {
-        ch.send(`🎉 ようこそ <@${user.id}>！`);
-      }
-    } catch {}
+    const mod = await guild.channels.fetch(process.env.MOD_LOG_CHANNEL);
 
+    if (mod?.isTextBased()) {
+      mod.send(
+`🛡 AUTH SUCCESS
+user: ${user.username}
+id: ${user.id}
+ip: ${ipHash.slice(0,8)}
+ua: ${uaHash.slice(0,8)}`
+      );
+    }
+    res.send(`<h1>認証完了 🎉 ${user.username}</h1>`);
+  } catch (e) {
     try {
-      const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+      const guild = await client.guilds.fetch(process.env.GUILD_ID);
+      const mod = await guild.channels.fetch(process.env.MOD_LOG_CHANNEL);
+
       if (mod?.isTextBased()) {
         mod.send(
-          `🛡 認証成功: <@${user.id}> IP:${ipHash.slice(0,8)} UA:${uaHash.slice(0,8)}`
+`🚫 AUTH FAILED
+reason: ${e.message}
+ip: ${ipHash?.slice(0,8) ?? "unknown"}`
         );
       }
     } catch {}
-
-    res.send(`<h1>認証完了 🎉 ${user.username} さん</h1>`);
-  } catch (e) {
     res
       .status(403)
       .send(`<h1>認証失敗</h1><p>${e.message}</p>`);
@@ -575,12 +604,10 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     const body = commands.map(cmd =>
       typeof cmd.toJSON === "function" ? cmd.toJSON() : cmd
     );
-
+    console.log(body);
+    
     await rest.put(
-      Routes.applicationGuildCommands(
-        DISCORD_CLIENT_ID,
-        DISCORD_GUILD_ID
-      ),
+      Routes.applicationGuildsCommands(DISCORD_CLIENT_ID,"1400830654949753023"),
       { body }
     );
 
@@ -592,7 +619,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     });
 
   }
-})();
+});
 
 // pinned table check note: with Supabase you'd usually create tables via migration
 async function ensurePinnedTableExists() {
@@ -612,12 +639,19 @@ if (isPrimaryShard()) {
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
+  let sub = null;
+  
+  if(interaction.isChatInputCommand()) {
+    sub = interaction.options.getSubcommand(false);
+  }
+  
   await handleInteractionCreate(interaction, {
     client,
     fetch,
     chartJSNodeCanvas,
     os,
     si,
+    sub,
     AttachmentBuilder,
     EmbedBuilder,
     ActionRowBuilder,
@@ -1033,27 +1067,30 @@ if (!selectedRarity) return
 
   const hit = pool[Math.floor(Math.random() * pool.length)]
 
-  /* ===== ログ保存 ===== */
-  await supabase.from('gacha_logs').insert({
-    user_id: message.author.id,
-    guild_id: message.guild.id,
-    set_id: set.id,
-    item_id: hit.id,
-    item_name: hit.name,
-    rarity: hit.rarity
+  /* ===== ログ保存（引いた記録を書き込む） ===== */
+  await supabase
+    .from('gacha_logs')
+    .insert({
+    guild_id: 'guild',           
+    set_id: set.id,              
+    user_id: message.author.id,  
+    display_id: hit.display_id,  
+    rarity: hit.rarity           
   })
+
 
   /* ===== Embed ===== */
   const embed = new EmbedBuilder()
     .setTitle(`🎰 ${set.name}`)
-    .setDescription(`**${hit.name}**`)
+    .setDescription(`**${hit.name}**\n**${hit.description}**`)
     .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
     .setColor(0xF1C40F)
 
   await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
-client.on("messageCreate", async message => {
+client.on("messageCreate", async (message) => {
+
   if (message.author.bot) return;
 
   if (!message.guild) {
@@ -1061,6 +1098,58 @@ client.on("messageCreate", async message => {
 
     try {
       const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+  
+  /* =====================
+     SHARD SAFE SIDE EFFECT
+  ===================== */
+  const isShard0 = !client.shard || client.shard.ids.includes(0);
+  if (!isShard0) return;
+  
+  /* =====================
+     DM COMMAND
+  ===================== */
+
+  if (!message.guild) {
+
+    const cmd = message.content.trim();
+
+    if (cmd === "/unselfto") {
+      try {
+        const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+        const member = await guild.members.fetch(message.author.id);
+
+        if (!member.communicationDisabledUntilTimestamp ||
+            member.communicationDisabledUntilTimestamp <= Date.now()) {
+          await message.reply("現在タイムアウトされていません。");
+          return;
+        }
+
+        await member.timeout(null, "DM command /unselfto");
+        await clearTimeoutContinuation(guild.id, message.author.id);
+        await message.reply("✅ タイムアウトを解除しました。");
+
+        const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+        if (mod?.isTextBased()) {
+          mod.send(
+`🔓 Timeout Released
+user: ${message.author.tag}
+id: ${message.author.id}
+method: DM /unselfto`
+          );
+        }
+      } catch (err) {
+        console.error("/unselfto failed:", err);
+        await message.reply("処理に失敗しました。").catch(()=>{});
+      }
+      return;
+    }
+
+    if (cmd === "s.toleft") {
+
+    try {
+
+      const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
+
       const member = await guild.members.fetch(message.author.id);
 
       if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
@@ -1073,20 +1162,68 @@ client.on("messageCreate", async message => {
         return;
       }
 
-      await member.timeout(null, "DM command: s.toleft");
-      await message.reply("タイムアウトを解除しました。");
+      await member.timeout(null, "DM command self release");
+      await message.reply("✅ タイムアウトを解除しました。");
+      /* MOD LOG */
+      const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+
+      if (mod?.isTextBased()) {
+        mod.send(
+`🔓 Timeout Released
+user: ${message.author.tag}
+id: ${message.author.id}
+method: DM command`
+        );
+      }
     } catch (err) {
-      console.error("s.toleft processing failed:", err);
-      await message.reply("処理に失敗しました。").catch(() => {});
+      console.error("s.toleft failed:", err);
+      await message.reply("処理に失敗しました。").catch(()=>{});
     }
     return;
   }
+    if (cmd === "h.toleft") {
 
-  // shard 0 のみ副作用OK
-  const isShard0 = !client.shard || client.shard.ids[0] === 0;
+    try {
+      const HIMASABA_ID = "1400830654949753023";
+      const HIMASABA_MOD_ID = "1400885372480913458";
+      const guild = await client.guilds.fetch(HIMASABA_ID);
 
+      const member = await guild.members.fetch(message.author.id);
+
+      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        await message.reply("この操作を実行する権限がありません。");
+        return;
+      }
+
+      if (!member.communicationDisabledUntilTimestamp ||
+          member.communicationDisabledUntilTimestamp <= Date.now()) {
+
+        await message.reply("現在タイムアウトされていません。");
+        return;
+      }
+
+      await member.timeout(null, "DM command self release");
+      await message.reply("✅ タイムアウトを解除しました。");
+      /* MOD LOG */
+      const mod = await guild.channels.fetch(HIMASABA_MOD);
+
+      if (mod?.isTextBased()) {
+        mod.send(
+`🔓 Timeout Released
+user: ${message.author.tag}
+id: ${message.author.id}
+method: DM command`
+        );
+      }
+    } catch (err) {
+      console.error("h.toleft failed:", err);
+      await message.reply("処理に失敗しました。").catch(()=>{});
+    }
+    return;
+  }
+  }   
+  
   /* ===== ガチャ処理（あっても無くてもOK） ===== */
-  if (isShard0) {
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
@@ -1102,9 +1239,7 @@ client.on("messageCreate", async message => {
         break;
       }
     }
-  }
-
-  /* ===== 以下は常に動く ===== */
+  
 
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);
@@ -1121,7 +1256,8 @@ cron.schedule(
   "0 0 5 * * *", // 秒まで指定して明示的に
   async () => {
     // シャーディング対応：最初のシャード以外は実行しない
-    if (client.shard && client.shard.ids[0] !== 0) return;
+    const isShard0cron = !client.shard || client.shard.ids.includes(0);
+    if (!isShard0cron) return;
 
     try {
       console.log("📢 Sending daily odai…");

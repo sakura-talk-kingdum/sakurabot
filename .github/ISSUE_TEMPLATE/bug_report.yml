@@ -1,0 +1,49 @@
+name: 🐛 バグ報告
+description: 不具合の報告はこちら
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ このプロジェクトは discordbot｢さくらbot｣及び関係サービスのバグ報告です。
+        
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きているか簡潔に書いてください
+      placeholder: 認証時に常にエラーになる
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: バグが再現する手順
+      placeholder: |
+        1. 認証ボタンを押す
+        2. callback にリダイレクトされる
+        3. エラーが表示される
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作
+      placeholder: 正常に認証される
+
+  - type: input
+    id: version
+    attributes:
+      label: 動作 バージョン
+      placeholder: chrome 132.xx Ubuntu 24.xxx
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ / エラーメッセージ
+      description: Console のログがあれば貼ってください
+      render: shell
