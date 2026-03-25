@@ -292,7 +292,11 @@ app.get('/', cors(), (req, res) => {
 });
 
 // コールバック
-app.get('/auth/callback', cors(), handleOAuthCallback);
+// client は Discord.js で初期化したインスタンス名に合わせてください
+app.get('/auth/callback', cors(), (req, res) => {
+    handleOAuthCallback(req, res, client); 
+});
+
 
 
 // ===== 管理画面 =====
