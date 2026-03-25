@@ -12,6 +12,28 @@ export const shardState = {
 
 const totalShards = 2;
 
+const PRIMARY_SHARD_ID = 0;
+
+async function syncShardRoles() {
+  try {
+    await manager.broadcastEval(
+      (client, { primaryShardId }) => {
+        globalThis.__SAKURA_SHARD_ROLE__ = {
+          primaryShardId,
+          shardId: client.shard.ids[0],
+          isPrimary: client.shard.ids[0] === primaryShardId,
+          syncedAt: Date.now()
+        };
+
+        return globalThis.__SAKURA_SHARD_ROLE__;
+      },
+      { context: { primaryShardId: PRIMARY_SHARD_ID } }
+    );
+  } catch (e) {
+    console.error("❌ shard role sync failed", e);
+  }
+}
+
 const manager = new ShardingManager("./bot.js", {
   token: process.env.DISCORD_BOT_TOKEN,
   totalShards
@@ -41,7 +63,10 @@ async function updateShardState() {
 }
 
 manager.spawn().then(() => {
+  syncShardRoles();
   updateShardState();
+
+  setInterval(syncShardRoles, 60_000);
   setInterval(updateShardState, 60_000); // 1分で十分
 });
 
