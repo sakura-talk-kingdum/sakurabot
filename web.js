@@ -628,6 +628,7 @@ const localDateString = date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
 // 📌 /odai → HTML直書き + お題追加フォーム
 app.get("/odai", cors(), (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  console.log(req.ip);
   res.send(`
 <!DOCTYPE html>
 <html lang="ja">
