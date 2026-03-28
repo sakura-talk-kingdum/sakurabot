@@ -1090,167 +1090,106 @@ if (!selectedRarity) return
 }
 
 client.on("messageCreate", async (message) => {
-
   if (message.author.bot) return;
 
-  if (!message.guild) {
-    if (message.content.trim() !== "s.toleft") return;
-
-    try {
-      const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-  
-  /* =====================
-     SHARD SAFE SIDE EFFECT
-  ===================== */
+  // Shard 0 のみで実行する処理のフラグ
   const isShard0 = !client.shard || client.shard.ids.includes(0);
-  if (!isShard0) return;
-  
-  /* =====================
-     DM COMMAND
-  ===================== */
 
+  /* =====================
+      DM COMMANDS
+  ===================== */
   if (!message.guild) {
+    if (!isShard0) return; // 重複実行防止
 
     const cmd = message.content.trim();
+    
+    // コマンド判定用の設定オブジェクト
+    const dmCommands = {
+      "/unselfto": { guildId: DISCORD_GUILD_ID, modLogId: DISCORD_MOD_LOG_CHANNEL_ID, checkPerms: false },
+      "s.toleft":  { guildId: DISCORD_GUILD_ID, modLogId: DISCORD_MOD_LOG_CHANNEL_ID, checkPerms: true },
+      "h.toleft":  { guildId: "1400830654949753023", modLogId: "1400885372480913458", checkPerms: true }
+    };
 
-    if (cmd === "/unselfto") {
-      try {
-        const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-        const member = await guild.members.fetch(message.author.id);
-
-        if (!member.communicationDisabledUntilTimestamp ||
-            member.communicationDisabledUntilTimestamp <= Date.now()) {
-          await message.reply("現在タイムアウトされていません。");
-          return;
-        }
-
-        await member.timeout(null, "DM command /unselfto");
-        await clearTimeoutContinuation(guild.id, message.author.id);
-        await message.reply("✅ タイムアウトを解除しました。");
-
-        const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
-        if (mod?.isTextBased()) {
-          mod.send(
-`🔓 Timeout Released
-user: ${message.author.tag}
-id: ${message.author.id}
-method: DM /unselfto`
-          );
-        }
-      } catch (err) {
-        console.error("/unselfto failed:", err);
-        await message.reply("処理に失敗しました。").catch(()=>{});
-      }
-      return;
-    }
-
-    if (cmd === "s.toleft") {
+    const config = dmCommands[cmd];
+    if (!config) return;
 
     try {
+      const guild = await client.guilds.fetch(config.guildId);
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
 
-      const guild = await client.guilds.fetch(DISCORD_GUILD_ID);
-
-      const member = await guild.members.fetch(message.author.id);
-
-      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-        await message.reply("この操作を実行する権限がありません。");
-        return;
+      if (!member) {
+        return await message.reply("対象のサーバーに所属していません。");
       }
 
+      // 権限チェックが必要なコマンドの場合
+      if (config.checkPerms && !member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        return await message.reply("この操作を実行する権限がありません。");
+      }
+
+      // タイムアウト中かチェック
       if (!member.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
-        await message.reply("現在タイムアウトされていません。");
-        return;
+        return await message.reply("現在タイムアウトされていません。");
       }
 
-      await member.timeout(null, "DM command self release");
-      await message.reply("✅ タイムアウトを解除しました。");
-      /* MOD LOG */
-      const mod = await guild.channels.fetch(DISCORD_MOD_LOG_CHANNEL_ID);
+      // 解除処理
+      await member.timeout(null, `DM command: ${cmd}`);
+      
+      // データベース連携がある場合はここに追加 (例: deleteTimeoutContinuation)
+      if (cmd === "/unselfto") {
+        await deleteTimeoutContinuation(guild.id, message.author.id).catch(() => {});
+      }
 
-      if (mod?.isTextBased()) {
-        mod.send(
+      await message.reply(`✅ タイムアウトを解除しました。 (${cmd})`);
+
+      // ログ送信
+      const modLog = await guild.channels.fetch(config.modLogId).catch(() => null);
+      if (modLog?.isTextBased()) {
+        await modLog.send(
 `🔓 Timeout Released
-user: ${message.author.tag}
-id: ${message.author.id}
-method: DM command`
+user: ${message.author.tag} (${message.author.id})
+method: DM command ${cmd}`
         );
       }
     } catch (err) {
-      console.error("s.toleft failed:", err);
-      await message.reply("処理に失敗しました。").catch(()=>{});
+      console.error(`DM command ${cmd} failed:`, err);
+      await message.reply("処理中にエラーが発生しました。").catch(() => {});
     }
-    return;
+    return; // DMの場合はここで終了
   }
-    if (cmd === "h.toleft") {
 
-    try {
-      const HIMASABA_ID = "1400830654949753023";
-      const HIMASABA_MOD_ID = "1400885372480913458";
-      const guild = await client.guilds.fetch(HIMASABA_ID);
-
-      const member = await guild.members.fetch(message.author.id);
-
-      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-        await message.reply("この操作を実行する権限がありません。");
-        return;
-      }
-
-      if (!member.communicationDisabledUntilTimestamp ||
-          member.communicationDisabledUntilTimestamp <= Date.now()) {
-
-        await message.reply("現在タイムアウトされていません。");
-        return;
-      }
-
-      await member.timeout(null, "DM command self release");
-      await message.reply("✅ タイムアウトを解除しました。");
-      /* MOD LOG */
-      const mod = await guild.channels.fetch(HIMASABA_MOD);
-
-      if (mod?.isTextBased()) {
-        mod.send(
-`🔓 Timeout Released
-user: ${message.author.tag}
-id: ${message.author.id}
-method: DM command`
-        );
-      }
-    } catch (err) {
-      console.error("h.toleft failed:", err);
-      await message.reply("処理に失敗しました。").catch(()=>{});
-    }
-    return;
-  }
-  }   
+  /* =====================
+      GUILD MESSAGES
+  ===================== */
   
-  /* ===== ガチャ処理（あっても無くてもOK） ===== */
+  // ガチャ処理
+  try {
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
-      .eq('guild_id', 'guild')
+      .eq('guild_id', message.guild.id) // 文字列 'guild' ではなく実際の ID
       .eq('enabled', true);
 
     if (sets?.length) {
-      for (const set of sets) {
-        if (message.channel.id !== set.channel_id) continue;
-        if (message.content.trim() !== set.trigger_word) continue;
-
-        await runGacha(message, set);
-        break;
+      const matchedSet = sets.find(s => s.channel_id === message.channel.id && s.trigger_word === message.content.trim());
+      if (matchedSet) {
+        await runGacha(message, matchedSet);
+        return; // ガチャが反応した場合は他の処理をスキップ
       }
     }
-  
+  } catch (err) {
+    console.error("Gacha check failed:", err);
+  }
 
+  // AI チャンネル処理
   if (message.channel.id === AI_CHANNEL_ID) {
     return handleAI(message);
   }
 
+  // その他サイドエフェクト (Shard 0 のみ)
   if (isShard0) {
-    await handlePinned(message);
-    await addUserExperience(message.author.id, "text");
+    await handlePinned(message).catch(console.error);
+    await addUserExperience(message.author.id, "text").catch(console.error);
   }
-}
-}
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
