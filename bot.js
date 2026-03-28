@@ -1249,6 +1249,8 @@ method: DM command`
     await handlePinned(message);
     await addUserExperience(message.author.id, "text");
   }
+}
+}
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
