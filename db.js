@@ -14,11 +14,10 @@ export const supabase = createClient(
 );
 
 /* =====================
-   USERS
+    USERS & AUTH
 ===================== */
 
 export async function upsertUserAuth(userId, username, ipHash, uaHash) {
-
   const { error } = await supabase
     .from("users")
     .upsert({
@@ -35,7 +34,6 @@ export async function upsertUserAuth(userId, username, ipHash, uaHash) {
 }
 
 export async function findUserByIPandUA(ipHash, uaHash) {
-
   const { data, error } = await supabase
     .from("users")
     .select("user_id")
@@ -45,16 +43,10 @@ export async function findUserByIPandUA(ipHash, uaHash) {
     .maybeSingle();
 
   if (error) throw error;
-
   return data?.user_id ?? null;
 }
 
-/* =====================
-   AUTH LOGS
-===================== */
-
 export async function insertAuthLog(userId, ipHash, uaHash, type, detail) {
-
   const { error } = await supabase
     .from("auth_logs")
     .insert({
@@ -66,57 +58,33 @@ export async function insertAuthLog(userId, ipHash, uaHash, type, detail) {
       created_at: new Date().toISOString()
     });
 
-  if (error) {
-    console.error("Auth log failed", error);
-  }
+  if (error) throw error; // 呼び出し元でハンドリングできるよう throw を推奨
 }
 
 /* =====================
-   WARN
+    MODERATION (WARN & LOGS)
 ===================== */
 
+/**
+ * 警告回数をインクリメント (RPCを使用しない場合、安全なインクリメントは以下)
+ */
 export async function addWarn(userId, amount = 1) {
-
-  const { data } = await supabase
+  // Supabaseのupdateで直接加算（rpcを使わない場合）
+  const { data, error: fetchError } = await supabase
     .from("users")
     .select("warn")
     .eq("user_id", userId)
     .maybeSingle();
 
-  const warn = (data?.warn ?? 0) + amount;
+  if (fetchError) throw fetchError;
 
-  await supabase
+  const { error } = await supabase
     .from("users")
-    .update({ warn })
+    .update({ warn: (data?.warn ?? 0) + amount })
     .eq("user_id", userId);
-}
 
-export async function insertModerationLog({
-  guildId,
-  targetUserId,
-  moderatorUserId,
-  action,
-  reason = null,
-  durationMs = null
-}) {
-  const { error } = await supabase
-    .from("moderation_logs")
-    .insert({
-      guild_id: guildId,
-      target_user_id: targetUserId,
-      moderator_user_id: moderatorUserId,
-      action,
-      reason,
-      duration_ms: durationMs,
-      created_at: new Date().toISOString()
-    });
   if (error) throw error;
 }
-
-
-/* =====================
-   MODERATION LOGS
-===================== */
 
 export async function insertModerationLog({
   guildId,
@@ -141,9 +109,8 @@ export async function insertModerationLog({
   if (error) throw error;
 }
 
-
 /* =====================
-   TIMEOUT CONTINUATIONS
+    TIMEOUT CONTINUATIONS
 ===================== */
 
 export async function upsertTimeoutContinuation({
@@ -155,17 +122,16 @@ export async function upsertTimeoutContinuation({
 }) {
   const { error } = await supabase
     .from("timeout_continuations")
-    .upsert(
-      {
-        guild_id: guildId,
-        target_user_id: targetUserId,
-        reason,
-        target_until: targetUntil,
-        next_apply_at: nextApplyAt,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "guild_id,target_user_id" }
-    );
+    .upsert({
+      guild_id: guildId,
+      target_user_id: targetUserId,
+      reason,
+      target_until: targetUntil,
+      next_apply_at: nextApplyAt,
+      updated_at: new Date().toISOString()
+    }, { 
+      onConflict: "guild_id,target_user_id" 
+    });
 
   if (error) throw error;
 }
@@ -177,54 +143,6 @@ export async function deleteTimeoutContinuation(guildId, targetUserId) {
     .eq("guild_id", guildId)
     .eq("target_user_id", targetUserId);
 
-  if (error) throw error;
-}
-
-export async function listDueTimeoutContinuations(nowIso) {
-  const { data, error } = await supabase
-    .from("timeout_continuations")
-    .select("guild_id,target_user_id,reason,target_until,next_apply_at")
-    .lte("next_apply_at", nowIso)
-    .order("next_apply_at", { ascending: true })
-    .limit(100);
-
-  if (error) throw error;
-  return data ?? [];
-}
-
-/* =====================
-   TIMEOUT CONTINUATIONS (タイムアウト継続)
-===================== */
-
-export async function upsertTimeoutContinuation({
-  guildId,
-  targetUserId,
-  reason = null,
-  targetUntil,
-  nextApplyAt
-}) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .upsert(
-      {
-        guild_id: guildId,
-        target_user_id: targetUserId,
-        reason,
-        target_until: targetUntil,
-        next_apply_at: nextApplyAt,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "guild_id,target_user_id" }
-    );
-  if (error) throw error;
-}
-
-export async function deleteTimeoutContinuation(guildId, targetUserId) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .delete()
-    .eq("guild_id", guildId)
-    .eq("target_user_id", targetUserId);
   if (error) throw error;
 }
 
@@ -241,7 +159,7 @@ export async function listDueTimeoutContinuations(nowIso = new Date().toISOStrin
 }
 
 /* =====================
-   PINNED MESSAGES
+    PINNED MESSAGES
 ===================== */
 
 export async function getPinnedByChannel(channel_id) {
@@ -258,16 +176,16 @@ export async function getPinnedByChannel(channel_id) {
 export async function upsertPinned(channel_id, message_id, content, author_name) {
   const { error } = await supabase
     .from("pinned_messages")
-    .upsert(
-      {
-        channel_id,
-        message_id,
-        content,
-        author_name,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "channel_id" }
-    );
+    .upsert({
+      channel_id,
+      message_id,
+      content,
+      author_name,
+      updated_at: new Date().toISOString()
+    }, { 
+      onConflict: "channel_id" 
+    });
+
   if (error) throw error;
 }
 
@@ -276,5 +194,6 @@ export async function deletePinned(channel_id) {
     .from("pinned_messages")
     .delete()
     .eq("channel_id", channel_id);
+
   if (error) throw error;
 }
