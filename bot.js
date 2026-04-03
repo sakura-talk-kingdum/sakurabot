@@ -609,7 +609,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     console.log(body);
     
     await rest.put(
-      Routes.applicationGuildsCommands(DISCORD_CLIENT_ID,"1400830654949753023"),
+      Routes.applicationGuildCommands(DISCORD_CLIENT_ID,"1400830654949753023"),
       { body }
     );
 
