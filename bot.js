@@ -673,7 +673,7 @@ client.on('interactionCreate', async interaction => {
     createAudioPlayer,
     createAudioResource,
     AudioPlayerStatus,
-    VoiceConnectionStatus,
+   // VoiceConnectionStatus,
     entersState,
     StreamType,
     queues,
