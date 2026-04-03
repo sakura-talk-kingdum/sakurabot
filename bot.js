@@ -30,6 +30,8 @@ import {
   entersState,
   StreamType
 } from '@discordjs/voice';
+import path from "path";
+import { fileURLToPath } from "url";
 import ytdl from 'ytdl-core';
 import playdl from 'play-dl';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
@@ -663,12 +665,15 @@ client.on('interactionCreate', async interaction => {
     ModalBuilder,
     TextInputBuilder,
     TextInputStyle,
+    path,
+    fileURLToPath,
     ytdl,
     playdl,
     joinVoiceChannel,
     createAudioPlayer,
     createAudioResource,
     AudioPlayerStatus,
+    VoiceConnectionStatus,
     entersState,
     StreamType,
     queues,
