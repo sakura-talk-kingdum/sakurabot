@@ -1202,7 +1202,7 @@ cron.schedule(
   "0 0 5 * * *", // 秒まで指定して明示的に
   async () => {
     // シャーディング対応：最初のシャード以外は実行しない
-    const isShard0cron = !client.shard || client.shard.ids.includes(0);
+    const isShard0cron  = !client.shard || client.shard.ids.includes(0);
     if (!isShard0cron) return;
 
     try {
