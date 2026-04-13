@@ -1181,6 +1181,7 @@ method: DM command ${cmd}`
   
   // ガチャ処理
   try {
+    console.log(message.content);
     const { data: sets } = await supabase
       .from('gacha_sets')
       .select('*')
@@ -1190,6 +1191,7 @@ method: DM command ${cmd}`
     if (sets?.length) {
       const matchedSet = sets.find(s => s.channel_id === message.channel.id && s.trigger_word === message.content.trim());
       if (matchedSet) {
+        console.log("trigged runGacha");
         await runGacha(message, matchedSet);
         return; // ガチャが反応した場合は他の処理をスキップ
       }
