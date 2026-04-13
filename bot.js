@@ -1026,72 +1026,85 @@ if (!sent) return;
  }
 
 async function runGacha(message, set) {
-  console.log('guild', message.guild.id)
-  console.log('channel', message.channel.id)
-  console.log('content', message.content)
-  console.log('set', set.name)
+  try {
+    // 1. アイテム取得
+    const { data: items, error: itemError } = await supabase
+      .from('gacha_items')
+      .select('*')
+      .eq('set_id', set.id);
 
-  const { data: items, error } = await supabase
-    .from('gacha_items')
-    .select('*')
-    .eq('set_id', set.id)
-
-  if (error || !items || items.length === 0) return
-
-  /* ===== レアリティ抽選（DBの確率を使う） ===== */
-/* ===== レアリティ抽選 ===== */
-const probabilities =
-  typeof set.probabilities === 'string'
-    ? JSON.parse(set.probabilities)
-    : set.probabilities
-
-let rand = Math.random() * 100
-let acc = 0
-let selectedRarity = null
-
-for (const [rarity, percent] of Object.entries(probabilities)) {
-  acc += percent
-  if (rand <= acc) {
-    selectedRarity = rarity
-    break
-  }
-}
-
-if (!selectedRarity) return
-
-  /* ===== アイテム抽選（amountのみ） ===== */
-  const candidates = items.filter(i => i.rarity === selectedRarity)
-  if (candidates.length === 0) return
-
-  let pool = []
-  for (const i of candidates) {
-    for (let n = 0; n < i.amount; n++) {
-      pool.push(i)
+    if (itemError || !items || items.length === 0) {
+      console.error('No items found or error:', itemError);
+      return;
     }
+
+    // 2. レアリティ抽選
+    let probabilities = typeof set.probabilities === 'string' ? JSON.parse(set.probabilities) : set.probabilities;
+    let rand = Math.random() * 100;
+    let acc = 0;
+    let selectedRarity = null;
+
+    for (const [rarity, percent] of Object.entries(probabilities)) {
+      acc += Number(percent); // 数値として加算
+      if (rand <= acc) {
+        selectedRarity = rarity;
+        break;
+      }
+    }
+
+    if (!selectedRarity) {
+      // 確率の合計が100%未満の場合のフォールバック（最初のレアリティにする等）
+      selectedRarity = Object.keys(probabilities)[0];
+    }
+
+    // 3. アイテム抽選
+    const candidates = items.filter(i => i.rarity === selectedRarity);
+    if (candidates.length === 0) {
+      console.error(`No items found for rarity: ${selectedRarity}`);
+      return;
+    }
+
+    let pool = [];
+    for (const i of candidates) {
+      const amount = parseInt(i.amount) || 1; // 確実に数値化
+      for (let n = 0; n < amount; n++) {
+        pool.push(i);
+      }
+    }
+
+    const hit = pool[Math.floor(Math.random() * pool.length)];
+console.log(`--- ガチャ実行ログ ---`);
+  console.log(`サーバー名: ${message.guild.name} (${message.guild.id})`);
+  console.log(`チャンネル名: ${message.channel.name} (${message.channel.id})`);
+  console.log(`ユーザー: ${message.author.tag} (${message.author.id})`);
+  console.log(`入力文言: "${message.content}"`);
+  console.log(`ヒットした設定名: ${set.name}`);
+  console.log(`----------------------`);
+    // 4. ログ保存（await で完了を待つか、エラーをキャッチする）
+    const { error: logError } = await supabase
+      .from('gacha_logs')
+      .insert({
+        guild_id: message.guild.id, // 修正済み
+        set_id: set.id,
+        user_id: message.author.id,
+        display_id: hit.display_id,
+        rarity: hit.rarity
+      });
+    
+    if (logError) console.error("Log insert failed:", logError);
+
+    // 5. Embed 送信
+    const embed = new EmbedBuilder()
+      .setTitle(`🎰 ${set.name}`)
+      .setDescription(`**${hit.name}**\n${hit.description || ""}`)
+      .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
+      .setColor(0xF1C40F);
+
+    await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
+
+  } catch (err) {
+    console.error("Critical error in runGacha:", err);
   }
-
-  const hit = pool[Math.floor(Math.random() * pool.length)]
-
-  /* ===== ログ保存（引いた記録を書き込む） ===== */
-  await supabase
-    .from('gacha_logs')
-    .insert({
-    guild_id: 'guild',           
-    set_id: set.id,              
-    user_id: message.author.id,  
-    display_id: hit.display_id,  
-    rarity: hit.rarity           
-  })
-
-
-  /* ===== Embed ===== */
-  const embed = new EmbedBuilder()
-    .setTitle(`🎰 ${set.name}`)
-    .setDescription(`**${hit.name}**\n**${hit.description}**`)
-    .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
-    .setColor(0xF1C40F)
-
-  await message.reply({ embeds: [embed] , allowedMentions: { repliedUser: false } })
 }
 
 client.on("messageCreate", async (message) => {
