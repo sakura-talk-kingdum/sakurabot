@@ -10,8 +10,15 @@ import { shardState } from "./index.js";
 import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
 import csurf from 'csurf';
+import rateLimit from 'express-rate-limit';
 
 const app = express();
+const oauthCallbackLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // max 10 callback requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
@@ -300,7 +307,7 @@ app.get('/', cors(), (req, res) => {
 
 // コールバック
 // client は Discord.js で初期化したインスタンス名に合わせてください
-app.get('/auth/callback', cors(), (req, res) => {
+app.get('/auth/callback', cors(), oauthCallbackLimiter, (req, res) => {
     handleOAuthCallback(req, res, client); 
 });
 
