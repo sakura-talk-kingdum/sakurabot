@@ -16,6 +16,12 @@ app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(cookieParser());
 app.set('trust proxy', 1); 
+const csrf = require('csurf');
+const csrfProtection = csrf({ cookie: true });
+
+app.post('/process', csrfProtection, (req, res) => {
+  res.send('data is being processed');
+});
 
 const PORT = process.env.PORT || 3000;
 
