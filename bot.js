@@ -328,7 +328,14 @@ async function processDueTimeoutContinuations() {
           await clearTimeoutContinuation(job.guild_id, job.target_user_id);
         }
       } catch (err) {
-        console.error("timeout continuation process failed:", err);
+        // ★ ここを修正：ユーザーがサーバーにいない(10007)場合はデータを削除
+        if (err.code === 10007) {
+          console.warn(`[Timeout] ユーザー ${job.target_user_id} がサーバー ${job.guild_id} に存在しないため、データを削除します。`);
+          await deleteTimeoutContinuation(job.guild_id, job.target_user_id);
+        } else {
+          // それ以外のエラーは従来通りログに出力
+          console.error("timeout continuation process failed:", err);
+        }
       }
     }
   } catch (err) {
