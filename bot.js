@@ -1116,16 +1116,21 @@ console.log(`--- ガチャ実行ログ ---`);
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-
+  const role = globalThis.__SAKURA_SHARD_ROLE__;
+    if (role && !role.isPrimary) {
+      return; 
+    }
+    
+    // バックアップ用安全弁：万が一 role がまだ未定義だった場合の予備判定
+    if (!role && client.shard && !client.shard.ids.includes(0)) {
+      return;
+    }
   // Shard 0 のみで実行する処理のフラグ
-  const isShard0 = !client.shard || (client.shard.ids && client.shard.ids.includes(0));
 
   /* =====================
       DM COMMANDS
   ===================== */
   if (!message.guild) {
-    if (!isShard0) return; // 重複実行防止
-
     const cmd = message.content.trim();
     
     // コマンド判定用の設定オブジェクト
@@ -1213,10 +1218,12 @@ method: DM command ${cmd}`
   }
 
   // その他サイドエフェクト (Shard 0 のみ)
-  if (isShard0) {
+    if (role && !role.isPrimary) {
+    if (!role && client.shard && !client.shard.ids.includes(0)) {
     await handlePinned(message).catch(console.error);
     await addUserExperience(message.author.id, "text").catch(console.error);
   }
+}
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
@@ -1224,8 +1231,15 @@ cron.schedule(
   "0 0 5 * * *", // 秒まで指定して明示的に
   async () => {
     // シャーディング対応：最初のシャード以外は実行しない
-    const isShard0cron = !client.shard || (client.shard.ids && client.shard.ids.includes(0));
-    if (!isShard0cron) return;
+    const rolecron = globalThis.__SAKURA_SHARD_ROLE__;
+    if (rolecron && !rolecron.isPrimary) {
+      return; 
+    }
+    
+    // バックアップ用安全弁：万が一 role がまだ未定義だった場合の予備判定
+    if (!role && client.shard && !client.shard.ids.includes(0)) {
+      return;
+    }
 
     try {
       console.log("📢 Sending daily odai…");
