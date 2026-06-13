@@ -20,7 +20,8 @@ import {
   TextInputBuilder,
   TextInputStyle,
   Collection,
-  Partials
+  Partials,
+  ChannelType
 } from 'discord.js';
 import {
   joinVoiceChannel,
@@ -116,13 +117,6 @@ export const client = new Client({
   }
 });
 
-function isPrimaryShard() {
-  if (globalThis.__SAKURA_SHARD_ROLE__) {
-    return globalThis.__SAKURA_SHARD_ROLE__.isPrimary;
-  }
-
-  return !client.shard || client.shard.ids[0] === 0;
-}
 
 const DISCORD_TIMEOUT_MAX_MS = 28 * 24 * 60 * 60 * 1000;
 
@@ -605,8 +599,6 @@ ip: ${ipHash?.slice(0,8) ?? "unknown"}`
 const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
 (async () => {
-  if (!isPrimaryShard()) return;
-
   try {
     console.log("スラッシュコマンド登録中...");
 
@@ -642,9 +634,7 @@ async function ensurePinnedTableExists() {
     console.warn('pinned_messages table check unexpected error', e);
   }
 }
-if (isPrimaryShard()) {
-  ensurePinnedTableExists();
-}
+ensurePinnedTableExists();
 
 // interaction handler
 client.on('interactionCreate', async interaction => {
@@ -755,12 +745,10 @@ client.on("guildMemberRemove", async member => {
   });
 });
       
-if (isPrimaryShard()) {
-  processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
-  setInterval(() => {
-    processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
-  }, 30_000);
-}
+processDueTimeoutContinuations().catch(err => console.error("timeout continuation init failed:", err));
+setInterval(() => {
+  processDueTimeoutContinuations().catch(err => console.error("timeout continuation interval failed:", err));
+}, 30_000);
 
 /* 
   ガチャのデータ読み込み
@@ -1116,16 +1104,6 @@ console.log(`--- ガチャ実行ログ ---`);
 
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  const role = globalThis.__SAKURA_SHARD_ROLE__;
-    if (role && !role.isPrimary) {
-      return; 
-    }
-    
-    // バックアップ用安全弁：万が一 role がまだ未定義だった場合の予備判定
-    if (!role && client.shard && !client.shard.ids.includes(0)) {
-      return;
-    }
-  // Shard 0 のみで実行する処理のフラグ
 
   /* =====================
       DM COMMANDS
@@ -1217,30 +1195,15 @@ method: DM command ${cmd}`
     return handleAI(message);
   }
 
-  // その他サイドエフェクト (Shard 0 のみ)
-    if (role && !role.isPrimary) {
-    if (!role && client.shard && !client.shard.ids.includes(0)) {
-    await handlePinned(message).catch(console.error);
-    await addUserExperience(message.author.id, "text").catch(console.error);
-  }
-}
+  // その他サイドエフェクト
+  await handlePinned(message).catch(console.error);
+  await addUserExperience(message.author.id, "text").catch(console.error);
 });
 
 // 📌 JST 5:00 の Cron ジョブ（お題送信）
 cron.schedule(
   "0 0 5 * * *", // 秒まで指定して明示的に
   async () => {
-    // シャーディング対応：最初のシャード以外は実行しない
-    const rolecron = globalThis.__SAKURA_SHARD_ROLE__;
-    if (rolecron && !rolecron.isPrimary) {
-      return; 
-    }
-    
-    // バックアップ用安全弁：万が一 role がまだ未定義だった場合の予備判定
-    if (!role && client.shard && !client.shard.ids.includes(0)) {
-      return;
-    }
-
     try {
       console.log("📢 Sending daily odai…");
 
@@ -1262,8 +1225,9 @@ cron.schedule(
         
         if (resetError) throw resetError;
 
-        const { data: allOdai } = await supabase.from("odai").select("*");
-        unused = allOdai;
+        const { data: allOdai, error: refetchError } = await supabase.from("odai").select("*");
+        if (refetchError) throw refetchError;
+        unused = allOdai ?? [];
       }
 
       // 3. ランダムに選択
@@ -1300,15 +1264,13 @@ cron.schedule(
 // ready
 client.once('ready', async () => {
   console.log(`Bot logged in as ${client.user.tag}`);
-  const shardInfo = client.shard ? `${client.shard.ids[0] + 1}/${client.shard.count}` : '1/1';
   const ping = Math.round(client.ws.ping);
 
   client.user.setPresence({
-    activities: [{ name: `Shard ${shardInfo} | Ping: ${ping}ms`, type: 0 }],
+    activities: [{ name: `Ping: ${ping}ms`, type: 0 }],
      status: 'online'
   });
 
-if (isPrimaryShard()) {
 setInterval(async () => {
   try {
     const now = new Date();
@@ -1357,12 +1319,11 @@ setInterval(async () => {
     console.error("Interval内エラー:", globalError);
   }
 }, 10_000);
-}
 
   setInterval(() => {
     const pingNow = Math.round(client.ws.ping);
     client.user.setPresence({
-      activities: [{ name: `Shard ${shardInfo} | Ping: ${pingNow}ms`, type: 0 }],
+      activities: [{ name: `Ping: ${pingNow}ms`, type: 0 }],
       status: 'online'
     });
   }, 10000);

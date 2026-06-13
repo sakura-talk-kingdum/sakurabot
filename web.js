@@ -6,7 +6,6 @@ import crypto from 'crypto';
 import path from'path';
 dotenv.config();
 import { supabase } from "./db.js";
-import { shardState } from "./index.js";
 import { handleOAuthCallback, client, voiceStates } from './bot.js';
 import cors from 'cors';
 import csurf from 'csurf';
@@ -40,6 +39,33 @@ const {
 } = process.env
 
 const DISCORD_REDIRECT_URI = 'https://bot.sakurahp.f5.si/gachas/auth/callback';
+
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+function createOAuthState(res, cookieName) {
+  const state = crypto.randomBytes(32).toString('base64url');
+  res.cookie(cookieName, state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV !== 'development',
+    sameSite: 'lax',
+    maxAge: OAUTH_STATE_MAX_AGE_MS
+  });
+  return state;
+}
+
+function verifyOAuthState(req, res, cookieName) {
+  const expected = req.cookies[cookieName];
+  const actual = typeof req.query.state === 'string' ? req.query.state : '';
+  res.clearCookie(cookieName);
+
+  if (!expected || !actual) return false;
+
+  const expectedBuffer = Buffer.from(expected);
+  const actualBuffer = Buffer.from(actual);
+  return expectedBuffer.length === actualBuffer.length
+    && crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+}
+
 
 // ガチャ管理者（Discord User ID）
 const GACHA_ADMINS = [
@@ -100,14 +126,20 @@ function requireAdmin(req, res, next) {
 const DISCORD_API = "https://discord.com/api/v10";
 
 // ===== OAuth2 URL =====
-function adminOAuthURL() {
+function adminOAuthURL(state) {
   return `https://discord.com/oauth2/authorize?` +
     new URLSearchParams({
       client_id: process.env.DISCORD_CLIENT_ID,
       redirect_uri: 'https://bot.sakurahp.f5.si/admins/callback',
       response_type: "code",
       scope: "identify",
+      state
     });
+}
+
+function redirectToAdminOAuth(res) {
+  const state = createOAuthState(res, 'admin_oauth_state');
+  return res.redirect(adminOAuthURL(state));
 }
 
 // ===== Discord user取得 =====
@@ -132,7 +164,7 @@ async function getDiscordUser(code) {
 // ===== 管理者チェック =====
 async function requireAdminuser(req, res, next) {
   const adminId = req.cookies.admin;
-  if (!adminId) return res.redirect(adminOAuthURL());
+  if (!adminId) return redirectToAdminOAuth(res);
 
   const { data } = await supabase
     .from("admins")
@@ -146,6 +178,7 @@ async function requireAdminuser(req, res, next) {
 
 // 認証ページ
 app.get('/auth/', cors(), (req, res) => {
+  const state = createOAuthState(res, 'auth_oauth_state');
   res.send(`
   <!DOCTYPE html>
 <html lang="ja">
@@ -214,7 +247,7 @@ app.get('/auth/', cors(), (req, res) => {
   <div class="card">
     <h1>さくら雑談王国認証ページへようこそ</h1>
     <p>Discordアカウントでログインして、各種機能をご利用ください。</p>
-    <a href="https://discord.com/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify" class="button">
+    <a href="https://discord.com/oauth2/authorize?client_id=${process.env.DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(process.env.REDIRECT_URI)}&response_type=code&scope=identify&state=${encodeURIComponent(state)}" class="button">
       Discordで認証
     </a>
   </div>
@@ -307,6 +340,9 @@ app.get('/', cors(), (req, res) => {
 // コールバック
 // client は Discord.js で初期化したインスタンス名に合わせてください
 app.get('/auth/callback', cors(), oauthCallbackLimiter, (req, res) => {
+    if (!verifyOAuthState(req, res, 'auth_oauth_state')) {
+      return res.status(403).send('invalid oauth state');
+    }
     handleOAuthCallback(req, res, client); 
 });
 
@@ -379,6 +415,7 @@ ${rows || "<tr><td colspan='3'>まだ登録なし</td></tr>"}
 // ===== callback =====
 app.get("/admins/callback", cors(), async (req, res) => {
   const code = req.query.code;
+  if (!verifyOAuthState(req, res, 'admin_oauth_state')) return res.sendStatus(403);
   if (!code) return res.sendStatus(401);
 
   const user = await getDiscordUser(code);
@@ -622,19 +659,19 @@ app.get("/api/invites/:code", cors(), async (req, res) => {
   }
 });
 
-app.get("/shards/status", cors(), (_, res) => {
-  if (!shardState.shards.length) {
-    return res.status(503).json({
-      ok: false,
-      reason: "shard data not ready"
-    });
-  }
-const date = new Date(shardState.updatedAt);
-const localDateString = date.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+app.get("/status", cors(), (_, res) => {
+  const updatedAt = new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+
   res.json({
     ok: true,
-    updatedAt: localDateString,
-    shards: shardState.shards
+    mode: "single-process",
+    updatedAt,
+    bot: {
+      ready: client.isReady(),
+      ping: client.ws.ping,
+      guilds: client.guilds.cache.size,
+      uptime: client.uptime
+    }
   });
 });
 
@@ -721,18 +758,21 @@ app.post("/odai/add", cors(), async (req, res) => {
 });
 
 app.get('/gachas/login', cors(),  (req, res) => {
+  const state = createOAuthState(res, 'gachas_oauth_state');
   const url =
     `https://discord.com/oauth2/authorize` +
     `?client_id=${DISCORD_CLIENT_ID}` +
     `&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}` +
     `&response_type=code` +
-    `&scope=identify`
+    `&scope=identify` +
+    `&state=${encodeURIComponent(state)}`
 
   res.redirect(url)
 })
 
 app.get('/gachas/auth/callback', cors(), async (req, res) => {
   const { code } = req.query
+  if (!verifyOAuthState(req, res, 'gachas_oauth_state')) return res.status(403).send('invalid oauth state')
   if (!code) return res.status(400).send('no code')
 
   // token取得
