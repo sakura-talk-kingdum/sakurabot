@@ -1033,59 +1033,72 @@ async function runGacha(message, set) {
       return;
     }
 
-    // 2. レアリティ抽選
-    let probabilities = typeof set.probabilities === 'string' ? JSON.parse(set.probabilities) : set.probabilities;
-    let rand = Math.random() * 100;
-    let acc = 0;
+    // 2. レアリティ抽選 (安全なJSONパース)
+    let probabilities = set.probabilities;
+    if (typeof probabilities === 'string') {
+      try {
+        probabilities = JSON.parse(probabilities);
+      } catch (e) {
+        console.error("Failed to parse probabilities JSON:", e);
+        return;
+      }
+    }
+
+    // 確率の合計値を計算して重み付け抽選
+    const totalProbability = Object.values(probabilities).reduce((sum, val) => sum + Number(val), 0);
+    let rand = Math.random() * totalProbability;
     let selectedRarity = null;
 
     for (const [rarity, percent] of Object.entries(probabilities)) {
-      acc += Number(percent); // 数値として加算
-      if (rand <= acc) {
+      rand -= Number(percent);
+      if (rand <= 0) {
         selectedRarity = rarity;
         break;
       }
     }
 
     if (!selectedRarity) {
-      // 確率の合計が100%未満の場合のフォールバック（最初のレアリティにする等）
       selectedRarity = Object.keys(probabilities)[0];
     }
 
-    // 3. アイテム抽選
+    // 3. アイテム抽選 (配列を作らない重み付け抽選)
     const candidates = items.filter(i => i.rarity === selectedRarity);
     if (candidates.length === 0) {
       console.error(`No items found for rarity: ${selectedRarity}`);
       return;
     }
 
-    let pool = [];
-    for (const i of candidates) {
-      const amount = parseInt(i.amount) || 1; // 確実に数値化
-      for (let n = 0; n < amount; n++) {
-        pool.push(i);
+    const totalWeight = candidates.reduce((sum, item) => sum + (parseInt(item.amount) || 1), 0);
+    let itemRand = Math.random() * totalWeight;
+    let hit = candidates[0];
+
+    for (const item of candidates) {
+      itemRand -= (parseInt(item.amount) || 1);
+      if (itemRand <= 0) {
+        hit = item;
+        break;
       }
     }
 
-    const hit = pool[Math.floor(Math.random() * pool.length)];
-console.log(`--- ガチャ実行ログ ---`);
-  console.log(`サーバー名: ${message.guild.name} (${message.guild.id})`);
-  console.log(`チャンネル名: ${message.channel.name} (${message.channel.id})`);
-  console.log(`ユーザー: ${message.author.tag} (${message.author.id})`);
-  console.log(`入力文言: "${message.content}"`);
-  console.log(`ヒットした設定名: ${set.name}`);
-  console.log(`----------------------`);
-    // 4. ログ保存（await で完了を待つか、エラーをキャッチする）
+    console.log(`--- ガチャ実行ログ ---`);
+    console.log(`サーバー名: ${message.guild.name} (${message.guild.id})`);
+    console.log(`チャンネル名: ${message.channel.name} (${message.channel.id})`);
+    console.log(`ユーザー: ${message.author.tag} (${message.author.id})`);
+    console.log(`入力文言: "${message.content}"`);
+    console.log(`ヒットした設定名: ${set.name}`);
+    console.log(`----------------------`);
+
+    // 4. ログ保存
     const { error: logError } = await supabase
       .from('gacha_logs')
       .insert({
-        guild_id: message.guild.id, // 修正済み
+        guild_id: message.guild.id,
         set_id: set.id,
         user_id: message.author.id,
         display_id: hit.display_id,
         rarity: hit.rarity
       });
-    
+
     if (logError) console.error("Log insert failed:", logError);
 
     // 5. Embed 送信
@@ -1111,7 +1124,6 @@ client.on("messageCreate", async (message) => {
   if (!message.guild) {
     const cmd = message.content.trim();
     
-    // コマンド判定用の設定オブジェクト
     const dmCommands = {
       "/unselfto": { guildId: DISCORD_GUILD_ID, modLogId: DISCORD_MOD_LOG_CHANNEL_ID, checkPerms: false },
       "s.toleft":  { guildId: DISCORD_GUILD_ID, modLogId: DISCORD_MOD_LOG_CHANNEL_ID, checkPerms: true },
@@ -1129,40 +1141,33 @@ client.on("messageCreate", async (message) => {
         return await message.reply("対象のサーバーに所属していません。");
       }
 
-      // 権限チェックが必要なコマンドの場合
       if (config.checkPerms && !member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
         return await message.reply("この操作を実行する権限がありません。");
       }
 
-      // タイムアウト中かチェック
       if (!member.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
         return await message.reply("現在タイムアウトされていません。");
       }
 
-      // 解除処理
       await member.timeout(null, `DM command: ${cmd}`);
       
-      // データベース連携がある場合はここに追加 (例: deleteTimeoutContinuation)
       if (cmd === "/unselfto") {
         await deleteTimeoutContinuation(guild.id, message.author.id).catch(() => {});
       }
 
       await message.reply(`✅ タイムアウトを解除しました。 (${cmd})`);
 
-      // ログ送信
       const modLog = await guild.channels.fetch(config.modLogId).catch(() => null);
       if (modLog?.isTextBased()) {
         await modLog.send(
-`🔓 Timeout Released
-user: ${message.author.tag} (${message.author.id})
-method: DM command ${cmd}`
+          `🔓 Timeout Released\nuser: ${message.author.tag} (${message.author.id})\nmethod: DM command ${cmd}`
         );
       }
     } catch (err) {
       console.error(`DM command ${cmd} failed:`, err);
       await message.reply("処理中にエラーが発生しました。").catch(() => {});
     }
-    return; // DMの場合はここで終了
+    return;
   }
 
   /* =====================
@@ -1171,19 +1176,19 @@ method: DM command ${cmd}`
   
   // ガチャ処理
   try {
-    console.log(message.content);
-    const { data: sets } = await supabase
+    const { data: sets, error: setsError } = await supabase
       .from('gacha_sets')
       .select('*')
-      .eq('guild_id', message.guild.id) // 文字列 'guild' ではなく実際の ID
+      .eq('guild_id', message.guild.id)
       .eq('enabled', true);
 
-    if (sets?.length) {
+    if (setsError) {
+      console.error("Fetch gacha_sets error:", setsError);
+    } else if (sets?.length) {
       const matchedSet = sets.find(s => s.channel_id === message.channel.id && s.trigger_word === message.content.trim());
       if (matchedSet) {
-        console.log("trigged runGacha");
         await runGacha(message, matchedSet);
-        return; // ガチャが反応した場合は他の処理をスキップ
+        return;
       }
     }
   } catch (err) {
