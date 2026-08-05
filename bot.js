@@ -954,8 +954,9 @@ async function handleAI(message) {
       embeds: [new EmbedBuilder().setDescription("Thinking…").setColor(0xaaaaaa)]
     });
 
+    // モデルを Qwen 2.5 (7B Instruct) に変更
     const res = await fetch(
-      "https://router.huggingface.co/hf-inference/models/google/flan-t5-small",
+      "https://huggingface.co",
       {
         method: "POST",
         headers: {
@@ -966,8 +967,24 @@ async function handleAI(message) {
       }
     );
 
+    // 【デバック】ステータスコードの確認（200以外ならエラー）
+    console.log(`[DEBUG] API Status Code: ${res.status}`);
+
     const data = await res.json();
-    const text = data?.[0]?.generated_text ?? "……";
+    
+    // 【デバック】APIから返ってきた生データを丸ごとターミナルに表示
+    console.log("[DEBUG] API Full Response Data:", JSON.stringify(data, null, 2));
+
+    // Qwenの場合、[ { generated_text: "..." } ] の形式、またはチャット形式で返る場合があります
+    // まず配列の0番目から取得を試み、ダメならデータ直下やエラーメッセージを探します
+    let text = "……";
+    if (Array.isArray(data) && data[0]?.generated_text) {
+      text = data[0].generated_text;
+    } else if (data?.generated_text) {
+      text = data.generated_text;
+    } else if (data?.error) {
+      text = `⚠️ APIエラーメッセージ: ${data.error}`;
+    }
 
     await thinking.edit({
       embeds: [
@@ -978,16 +995,17 @@ async function handleAI(message) {
           })
           .setDescription(text.slice(0, 4000))
           .setColor(0x55ff99)
-          .setFooter({ text: "powered by Hugging Face" })
+          .setFooter({ text: "powered by Hugging Face (Qwen 2.5)" })
       ]
     });
 
   } catch (e) {
     rateLimit.delete(message.author.id);
-    console.error(e);
-    message.reply("⚠️ AIエラー");
+    console.error("[DEBUG] Catch Block Error:", e);
+    message.reply("⚠️ AIエラー（システムエラー）");
   }
 }
+
 
  async function handlePinned(message){
   try {
