@@ -60,6 +60,9 @@ import {
 import { commands } from "./lib/command/command.js";
 import { handleInteractionCreate } from "./lib/interaction/interactionCreate.js";
 
+import { HfInference } from "@huggingface/inference";
+
+const inference = new HfInference(process.env.HF_TOKEN);
 const width = 400;
 const height = 400;
 const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
@@ -954,37 +957,23 @@ async function handleAI(message) {
       embeds: [new EmbedBuilder().setDescription("Thinking…").setColor(0xaaaaaa)]
     });
 
-    // モデルを Qwen 2.5 (7B Instruct) に変更
-    const res = await fetch(
-      "https://huggingface.co",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/json"
+    // ドキュメントの書き方をベースに Qwen2.5-7B-Instruct を呼び出し
+    const response = await inference.chatCompletion({
+      model: "Qwen/Qwen2.5-7B-Instruct",
+      messages: [
+        {
+          role: "user",
+          content: message.content,
         },
-        body: JSON.stringify({ inputs: message.content })
-      }
-    );
+      ],
+      max_tokens: 1024,
+    });
 
-    // 【デバック】ステータスコードの確認（200以外ならエラー）
-    console.log(`[DEBUG] API Status Code: ${res.status}`);
+    // 【デバッグ】返ってきたオブジェクトの構造をログ出力
+    console.log("[DEBUG] SDK Response:", JSON.stringify(response, null, 2));
 
-    const data = await res.json();
-    
-    // 【デバック】APIから返ってきた生データを丸ごとターミナルに表示
-    console.log("[DEBUG] API Full Response Data:", JSON.stringify(data, null, 2));
-
-    // Qwenの場合、[ { generated_text: "..." } ] の形式、またはチャット形式で返る場合があります
-    // まず配列の0番目から取得を試み、ダメならデータ直下やエラーメッセージを探します
-    let text = "……";
-    if (Array.isArray(data) && data[0]?.generated_text) {
-      text = data[0].generated_text;
-    } else if (data?.generated_text) {
-      text = data.generated_text;
-    } else if (data?.error) {
-      text = `⚠️ APIエラーメッセージ: ${data.error}`;
-    }
+    // SDKが自動でパースしてくれるので、直感的にテキストを取得できます
+    const text = response.choices[0]?.message?.content ?? "……（返答が空でした）";
 
     await thinking.edit({
       embeds: [
@@ -995,17 +984,26 @@ async function handleAI(message) {
           })
           .setDescription(text.slice(0, 4000))
           .setColor(0x55ff99)
-          .setFooter({ text: "powered by Hugging Face (Qwen 2.5)" })
+          .setFooter({ text: "powered by Hugging Face (Qwen 2.5 7B via SDK)" })
       ]
     });
 
   } catch (e) {
     rateLimit.delete(message.author.id);
-    console.error("[DEBUG] Catch Block Error:", e);
-    message.reply("⚠️ AIエラー（システムエラー）");
+    
+    // エラー内容を詳しくログに出す
+    console.error("[DEBUG] SDK Error Details:", e);
+    
+    let failMessage = "⚠️ AIエラー（システムエラー）";
+    if (e.message?.includes("403")) {
+      failMessage = "⚠️ トークンエラー (403): Renderの環境変数「HF_TOKEN」が正しいか、前後に余計なスペースがないか確認してください。";
+    } else if (e.message?.includes("401")) {
+      failMessage = "⚠️ 認証エラー (401): HF_TOKENの文字列が間違っているか、有効期限が切れています。";
+    }
+
+    message.reply(failMessage);
   }
 }
-
 
  async function handlePinned(message){
   try {
