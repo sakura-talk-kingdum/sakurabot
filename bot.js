@@ -983,7 +983,7 @@ async function handleAI(message) {
 
     // Qwen呼び出し
     const response = await inference.chatCompletion({
-      model: "Qwen/Qwen2.5-7B-Instruct",
+      model: "google/gemma-4-12B-it",
       messages: messages,
       max_tokens: 1024,
     });
