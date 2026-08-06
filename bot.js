@@ -934,6 +934,9 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
         .eq("userid", userId);
   });
 
+// ファイルの上部（rateLimitの定義の近く）に追加
+const chatHistory = new Map();
+
 async function handleAI(message) {
   const now = Date.now();
   const last = rateLimit.get(message.author.id) ?? 0;
@@ -957,27 +960,45 @@ async function handleAI(message) {
       embeds: [new EmbedBuilder().setDescription("Thinking…").setColor(0xaaaaaa)]
     });
 
-    // ドキュメントの書き方をベースに Qwen2.5-7B-Instruct を呼び出し
+    // ユーザーごとの過去の履歴を取得（なければ空配列を作成）
+    let userHistory = chatHistory.get(message.author.id) ?? [];
+
+    // AIに送るメッセージの組み立て（システムプロンプト＋過去の履歴＋今の発言）
+    const messages = [
+      {
+        role: "system",
+        content: "あなたはユーザーの長年の「親友（幼馴染や親友のような関係）」です。以下のルールを厳格に守って日本語で会話してください。\n" +
+                 "1. 敬語や丁寧語（です・ます等）は絶対に禁止。完全なタメ口で話すこと。\n" +
+                 "2. 「～じゃん」「～だよね」「～だろ」「～じゃん？」など、自然で親しみやすい口調にする。\n" +
+                 "3. チャラい言葉（「ウェーイ」など）や、軽薄な喋り方は絶対にしないこと。落ち着きつつもフランクな距離感を保つ。\n" +
+                 "4. 知らないことは知ったかぶりせず、「それは知らないわ」「聞いたことないな」と素直に言うこと。\n" +
+                 "5. 相手を突き放さず、親身になって相談に乗ったり、冗談を言い合ったりする温かい距離感で接すること。",
+      },
+      ...userHistory, // 過去の会話履歴を展開
+      {
+        role: "user",
+        content: message.content,
+      }
+    ];
+
+    // Qwen呼び出し
     const response = await inference.chatCompletion({
       model: "Qwen/Qwen2.5-7B-Instruct",
-      messages: [
-        {
-          role: "system",
-          content: "あなたは親切なDiscordボットです。ユーザーからの質問には、必ず「日本語」で、自然かつ分かりやすく回答してください。",
-        },
-        {
-          role: "user",
-          content: message.content,
-        },
-      ],
+      messages: messages,
       max_tokens: 1024,
     });
 
-    // 【デバッグ】返ってきたオブジェクトの構造をログ出力
-    console.log("[DEBUG] SDK Response:", JSON.stringify(response, null, 2));
+    const text = response.choices?.message?.content ?? "……（返答が空でした）";
 
-    // SDKが自動でパースしてくれるので、直感的にテキストを取得できます
-    const text = response.choices[0]?.message?.content ?? "……（返答が空でした）";
+    // 今回の会話を履歴に追加
+    userHistory.push({ role: "user", content: message.content });
+    userHistory.push({ role: "assistant", content: text });
+
+    // 履歴が長くなりすぎるとエラーになるので、最新の5往復（10メッセージ）に制限
+    if (userHistory.length > 10) {
+      userHistory = userHistory.slice(-10);
+    }
+    chatHistory.set(message.author.id, userHistory);
 
     await thinking.edit({
       embeds: [
@@ -994,17 +1015,12 @@ async function handleAI(message) {
 
   } catch (e) {
     rateLimit.delete(message.author.id);
-    
-    // エラー内容を詳しくログに出す
     console.error("[DEBUG] SDK Error Details:", e);
     
     let failMessage = "⚠️ AIエラー（システムエラー）";
     if (e.message?.includes("403")) {
-      failMessage = "⚠️ トークンエラー (403): Renderの環境変数「HF_TOKEN」が正しいか、前後に余計なスペースがないか確認してください。";
-    } else if (e.message?.includes("401")) {
-      failMessage = "⚠️ 認証エラー (401): HF_TOKENの文字列が間違っているか、有効期限が切れています。";
+      failMessage = "⚠️ トークンエラー (403): 環境変数「HF_TOKEN」を確認してください。";
     }
-
     message.reply(failMessage);
   }
 }
