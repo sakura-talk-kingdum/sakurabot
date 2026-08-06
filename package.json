@@ -34,7 +34,8 @@
     "pidusage": "^3.0.2",
     "systeminformation": "^5.31.7",
     "csurf": "^1.11.0",
-    "express-rate-limit": "^8.5.2"
+    "express-rate-limit": "^8.5.2",
+    "@huggingface/inference": "^4.13.25"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
