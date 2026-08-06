@@ -981,12 +981,14 @@ async function handleAI(message) {
       }
     ];
 
-    // Qwen呼び出し
+    // ai呼び出し
     const response = await inference.chatCompletion({
       model: "google/gemma-4-12B-it",
       messages: messages,
-      max_tokens: 1024,
+      // 思考スペースを確保するため最低でも4096以上に引き上げる
+      max_tokens: 4096, 
     });
+
 
     const text = response.choices?.message?.content ?? "……（返答が空でした）";
 
@@ -1009,7 +1011,7 @@ async function handleAI(message) {
           })
           .setDescription(text.slice(0, 4000))
           .setColor(0x55ff99)
-          .setFooter({ text: "powered by Hugging Face (Qwen 2.5 7B)" })
+          .setFooter({ text: "powered by Hugging Face (Gemma4 12B)" })
       ]
     });
 
