@@ -983,16 +983,9 @@ async function handleAI(message) {
 
     // ai呼び出し
     const response = await inference.chatCompletion({
-      model: "google/gemma-4-12B-it",
+      model: "google/gemma-3-12B-it",
       messages: messages,
-      max_tokens: 1028,
-      // providerとextra_bodyの構造を以下に統一します
-      provider: "together",
-      extra_body: {
-        thinking: {
-          mode: "off"
-        }
-      }
+      max_tokens: 1028
     });
 
     const text = response.choices?.message?.content ?? "……（返答が空でした）";
@@ -1016,7 +1009,7 @@ async function handleAI(message) {
           })
           .setDescription(text.slice(0, 4000))
           .setColor(0x55ff99)
-          .setFooter({ text: "powered by Hugging Face (Gemma4 12B)" })
+          .setFooter({ text: "powered by Hugging Face (Gemma3 12B)" })
       ]
     });
 
@@ -1024,7 +1017,7 @@ async function handleAI(message) {
     rateLimit.delete(message.author.id);
     console.error("[DEBUG] SDK Error Details:", e);
     
-    let failMessage = "⚠️ AIエラー（システムエラー）";
+    let failMessage = `⚠️ AIエラー（システムエラー） ('${e.message}")`;
     if (e.message?.includes("403")) {
       failMessage = "⚠️ トークンエラー (403): 環境変数「HF_TOKEN」を確認してください。";
     }
