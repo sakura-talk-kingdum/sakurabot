@@ -985,10 +985,15 @@ async function handleAI(message) {
     const response = await inference.chatCompletion({
       model: "google/gemma-4-12B-it",
       messages: messages,
-      // 思考スペースを確保するため最低でも4096以上に引き上げる
-      max_tokens: 4096, 
+      max_tokens: 1028,
+      // providerとextra_bodyの構造を以下に統一します
+      provider: "together",
+      extra_body: {
+        thinking: {
+          mode: "off"
+        }
+      }
     });
-
 
     const text = response.choices?.message?.content ?? "……（返答が空でした）";
 
