@@ -962,6 +962,10 @@ async function handleAI(message) {
       model: "Qwen/Qwen2.5-7B-Instruct",
       messages: [
         {
+          role: "system",
+          content: "あなたは親切なDiscordボットです。ユーザーからの質問には、必ず「日本語」で、自然かつ分かりやすく回答してください。",
+        },
+        {
           role: "user",
           content: message.content,
         },
@@ -984,7 +988,7 @@ async function handleAI(message) {
           })
           .setDescription(text.slice(0, 4000))
           .setColor(0x55ff99)
-          .setFooter({ text: "powered by Hugging Face (Qwen 2.5 7B via SDK)" })
+          .setFooter({ text: "powered by Hugging Face (Qwen 2.5 7B)" })
       ]
     });
 
