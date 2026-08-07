@@ -994,8 +994,8 @@ async function handleAI(message) {
     userHistory.push({ role: "user", content: message.content });
     userHistory.push({ role: "assistant", content: text });
 
-    // 履歴が長くなりすぎるとエラーになるので、最新の5往復（10メッセージ）に制限
-    if (userHistory.length > 10) {
+    // 履歴が長くなりすぎるとエラーになるので、最新の2往復（4メッセージ）に制限
+    if (userHistory.length > 4) {
       userHistory = userHistory.slice(-10);
     }
     chatHistory.set(message.author.id, userHistory);
