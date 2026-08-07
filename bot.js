@@ -983,7 +983,7 @@ async function handleAI(message) {
 
     // ai呼び出し
     const response = await inference.chatCompletion({
-      model: "google/gemma-3-12B-it",
+      model: "google/gemma-3-12b-it",
       messages: messages,
       max_tokens: 1028
     });
