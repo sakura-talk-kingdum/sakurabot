@@ -349,7 +349,8 @@ app.get('/auth/callback', cors(), oauthCallbackLimiter, (req, res) => {
 
 
 // ===== 管理画面 =====
-app.get("/admins", requireAdminuser, cors(), async (req, res) => {
+app.get("/admins", requireAdminuser, csrfProtection, cors(), async (req, res) => {
+  const csrfToken = req.csrfToken();
   const { data } = await supabase
     .from("warned_users")
     .select("*")
@@ -398,6 +399,8 @@ ${rows || "<tr><td colspan='3'>まだ登録なし</td></tr>"}
 
 <h2>➕ 追加</h2>
 <form method="POST" action="/admins/add">
+  <input type="hidden" name="_csrf" value="${csrfToken}">
+  
   <label>Discord ID</label>
   <input name="targetId" required>
 
@@ -443,9 +446,9 @@ app.get("/admins/callback", cors(), async (req, res) => {
 // ===== 追加処理 =====
 app.post(
   "/admins/add",
+  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
   requireAdminuser,
   csrfProtection,
-  cors({ origin: "https://bot.sakurahp.f5.si", credentials: true }),
   async (req, res) => {
   const { targetId, reason } = req.body;
 
@@ -826,7 +829,22 @@ app.get('/gachas/me', requireAuth, cors({origin: ['https://bot.sakurahp.f5.si'],
   res.json(req.user)
 })
 
-app.get('/gachas/sets', requireAuth, requireAdmin, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.get(
+  '/gachas/csrf-token',
+  requireAuth,
+  csrfProtection,
+  cors({
+    origin: 'https://bot.sakurahp.f5.si',
+    credentials: true,
+  }),
+  (req, res) => {
+    res.json({
+      csrfToken: req.csrfToken(),
+    });
+  }
+);
+
+app.get('/gachas/sets', cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), requireAuth, requireAdmin, async (req, res) => {
   const { data, error } = await supabase
     .from('gacha_sets')
     .select('*')
@@ -836,7 +854,7 @@ app.get('/gachas/sets', requireAuth, requireAdmin, cors({origin: ['https://bot.s
   res.json(data)
 })
 
-app.post('/gachas/sets', requireAuth, requireAdmin, csrfProtection, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.post('/gachas/sets', cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), requireAuth, requireAdmin, csrfProtection, async (req, res) => {
   const { guild_id, name, channel_id, trigger_word } = req.body
 
   const { data, error } = await supabase
@@ -855,7 +873,7 @@ app.post('/gachas/sets', requireAuth, requireAdmin, csrfProtection, cors({origin
   res.status(201).json(data)
 })
 
-app.patch('/gachas/sets/:setid', requireAuth, requireAdmin, csrfProtection, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.patch('/gachas/sets/:setid', cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), requireAuth, requireAdmin, csrfProtection, async (req, res) => {
   const { setid } = req.params;
   const { name, channel_id, trigger_word, enabled } = req.body;
 
@@ -880,7 +898,7 @@ const { error } = await supabase
 });
 
 
-app.delete('/gachas/sets/:setId', requireAuth, requireAdmin, csrfProtection, cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), async (req, res) => {
+app.delete('/gachas/sets/:setId', cors({origin: ['https://bot.sakurahp.f5.si'],credentials: true}), requireAuth, requireAdmin, csrfProtection, async (req, res) => {
   const { setId } = req.params
 
   const { error } = await supabase
