@@ -1148,7 +1148,7 @@ async function runGacha(message, set) {
     // 5. Embed 送信
     const embed = new EmbedBuilder()
       .setTitle(`🎰 ${set.name}`)
-      .setDescription(`**${hit.name}**\n${finalDescription}`) // 置換後の変数を使用
+      .setDescription(**${hit.name}**\n${finalDescription}) // 置換後の変数を使用
       .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
       .setColor(0xF1C40F);
 
