@@ -82,7 +82,6 @@ small {
   color: #166534;
 }
 </style>
-
 </head>
 
 <body>
@@ -110,15 +109,20 @@ small {
 <script>
 
 const API = '/gachas';
+
+const GUILD_ID = '1208962938388484107';
+
 const $ = id => document.getElementById(id);
 
 let csrfToken = null;
+
 
 /* =========================================================
    STATUS
 ========================================================= */
 
 function showStatus(message, type = 'success') {
+
   const el = $('status');
 
   el.textContent = message;
@@ -128,6 +132,7 @@ function showStatus(message, type = 'success') {
     el.className = 'status';
   }, 3000);
 }
+
 
 /* =========================================================
    CSRF
@@ -141,7 +146,9 @@ async function loadCsrfToken() {
   });
 
   if (!res.ok) {
-    throw new Error(`CSRFトークン取得失敗: HTTP ${res.status}`);
+    throw new Error(
+      `CSRFトークン取得失敗: HTTP ${res.status}`
+    );
   }
 
   const data = await res.json();
@@ -155,9 +162,6 @@ async function loadCsrfToken() {
   return csrfToken;
 }
 
-/* =========================================================
-   CSRF FETCH
-========================================================= */
 
 async function csrfFetch(url, options = {}) {
 
@@ -166,6 +170,7 @@ async function csrfFetch(url, options = {}) {
   }
 
   const headers = new Headers(options.headers || {});
+
   headers.set('CSRF-Token', csrfToken);
 
   if (
@@ -182,12 +187,15 @@ async function csrfFetch(url, options = {}) {
     credentials: 'include'
   });
 
+  /*
+   * CSRFトークンが古くなっていた場合、
+   * 1回だけ再取得してリトライ
+   */
   if (res.status === 403) {
 
     try {
 
-      const cloned = res.clone();
-      const data = await cloned.json();
+      const data = await res.clone().json();
 
       if (
         data?.error === 'invalid csrf token' ||
@@ -205,33 +213,45 @@ async function csrfFetch(url, options = {}) {
         });
       }
 
-    } catch {}
+    } catch {
+      // JSONでない403はそのまま返す
+    }
   }
 
   return res;
 }
 
+
 /* =========================================================
-   RESPONSE CHECK
+   RESPONSE
 ========================================================= */
 
 async function checkResponse(res) {
 
-  if (res.ok) return true;
+  if (res.ok) {
+    return true;
+  }
 
   let message = `HTTP ${res.status}`;
 
   try {
+
     const data = await res.json();
-    if (data?.error) message = data.error;
-    else if (data?.message) message = data.message;
+
+    if (data?.error) {
+      message = data.error;
+    } else if (data?.message) {
+      message = data.message;
+    }
+
   } catch {}
 
   throw new Error(message);
 }
 
+
 /* =========================================================
-   SETS
+   SET
 ========================================================= */
 
 async function loadSets() {
@@ -249,43 +269,139 @@ async function loadSets() {
     $('sets').innerHTML = '';
 
     for (const s of sets) {
-      $('sets').insertAdjacentHTML('beforeend', renderSet(s));
-      loadItems(s.id);
+
+      $('sets').insertAdjacentHTML(
+        'beforeend',
+        renderSet(s)
+      );
+
+      await loadItems(s.id);
     }
 
   } catch (error) {
-    showStatus(`セット取得に失敗しました: ${error.message}`, 'error');
+
+    console.error(error);
+
+    showStatus(
+      `セット取得に失敗しました: ${error.message}`,
+      'error'
+    );
   }
 }
+
 
 function renderSet(s) {
 
   return `
-  <div class="set" id="set-${s.id}">
+  <div class="set" id="set-${escapeAttr(s.id)}">
 
     <b>${escapeHtml(s.name)}</b>
-    <small>(${escapeHtml(s.channel_id)} / ${escapeHtml(s.trigger_word)})</small>
+
+    <small>
+      (${escapeHtml(s.channel_id)}
+      /
+      ${escapeHtml(s.trigger_word)})
+    </small>
 
     <div class="toggle">
+
       <label>有効</label>
-      <input type="checkbox"
+
+      <input
+        type="checkbox"
         ${s.enabled ? 'checked' : ''}
-        onchange="toggleSet('${s.id}', this.checked)">
+        onchange="toggleSet('${escapeJs(s.id)}', this.checked)"
+      >
+
     </div>
 
     <div>
-      <input id="sname-${s.id}" value="${escapeAttr(s.name)}">
-      <input id="sch-${s.id}" value="${escapeAttr(s.channel_id)}">
-      <input id="str-${s.id}" value="${escapeAttr(s.trigger_word)}">
 
-      <button onclick="saveSet('${s.id}')">保存</button>
-      <button onclick="deleteSet('${s.id}')">削除</button>
+      <input
+        id="sname-${escapeAttr(s.id)}"
+        placeholder="セット名"
+        value="${escapeAttr(s.name)}"
+      >
+
+      <input
+        id="sch-${escapeAttr(s.id)}"
+        placeholder="チャンネルID"
+        value="${escapeAttr(s.channel_id)}"
+      >
+
+      <input
+        id="str-${escapeAttr(s.id)}"
+        placeholder="トリガー"
+        value="${escapeAttr(s.trigger_word)}"
+      >
+
+      <button onclick="saveSet('${escapeJs(s.id)}')">
+        保存
+      </button>
+
+      <button onclick="deleteSet('${escapeJs(s.id)}')">
+        削除
+      </button>
+
     </div>
 
-    <div class="items" id="items-${s.id}"></div>
 
-  </div>`;
+    <!-- =========================
+         ITEMS
+    ========================== -->
+
+    <div
+      class="items"
+      id="items-${escapeAttr(s.id)}"
+    >
+      <b>アイテム</b>
+    </div>
+
+
+    <!-- =========================
+         ADD ITEM
+    ========================== -->
+
+    <div>
+
+      <input
+        id="new-iname-${escapeAttr(s.id)}"
+        placeholder="アイテム名"
+      >
+
+      <input
+        id="new-idescription-${escapeAttr(s.id)}"
+        placeholder="説明"
+      >
+
+      <input
+        id="new-iamount-${escapeAttr(s.id)}"
+        type="number"
+        min="1"
+        placeholder="個数"
+      >
+
+      <select
+        id="new-irarity-${escapeAttr(s.id)}"
+      >
+        <option value="common">common</option>
+        <option value="uncommon">uncommon</option>
+        <option value="rare">rare</option>
+        <option value="epic">epic</option>
+        <option value="legend">legend</option>
+        <option value="superlegend">superlegend</option>
+      </select>
+
+      <button onclick="addItem('${escapeJs(s.id)}')">
+        追加
+      </button>
+
+    </div>
+
+  </div>
+  `;
 }
+
 
 /* =========================================================
    CREATE SET
@@ -293,26 +409,37 @@ function renderSet(s) {
 
 async function createSet() {
 
-  const name = $('new-name').value.trim();
-  const channel_id = $('new-channel').value.trim();
-  const trigger_word = $('new-trigger').value.trim();
+  const name =
+    $('new-name').value.trim();
+
+  const channel_id =
+    $('new-channel').value.trim();
+
+  const trigger_word =
+    $('new-trigger').value.trim();
 
   if (!name || !channel_id || !trigger_word) {
+
     alert('必須項目を入力してください');
+
     return;
   }
 
   try {
 
-    const res = await csrfFetch(`${API}/sets`, {
-      method: 'POST',
-      body: JSON.stringify({
-        guild_id: '1208962938388484107',
-        name,
-        channel_id,
-        trigger_word
-      })
-    });
+    const res = await csrfFetch(
+      `${API}/sets`,
+      {
+        method: 'POST',
+
+        body: JSON.stringify({
+          guild_id: GUILD_ID,
+          name,
+          channel_id,
+          trigger_word
+        })
+      }
+    );
 
     await checkResponse(res);
 
@@ -320,168 +447,538 @@ async function createSet() {
     $('new-channel').value = '';
     $('new-trigger').value = '';
 
-    showStatus('作成しました');
+    showStatus('ガチャセットを作成しました');
 
     await loadSets();
 
-  } catch (e) {
-    showStatus(`作成失敗: ${e.message}`, 'error');
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `作成に失敗しました: ${error.message}`,
+      'error'
+    );
   }
 }
 
+
 /* =========================================================
-   SAVE / TOGGLE / DELETE SET
+   SAVE SET
 ========================================================= */
 
 async function saveSet(id) {
 
   const body = {};
 
-  const name = $(`sname-${id}`).value.trim();
-  const channel_id = $(`sch-${id}`).value.trim();
-  const trigger_word = $(`str-${id}`).value.trim();
+  const name =
+    $(`sname-${id}`).value.trim();
 
-  if (name) body.name = name;
-  if (channel_id) body.channel_id = channel_id;
-  if (trigger_word) body.trigger_word = trigger_word;
+  const channel_id =
+    $(`sch-${id}`).value.trim();
 
-  if (!Object.keys(body).length) return;
+  const trigger_word =
+    $(`str-${id}`).value.trim();
+
+  if (name) {
+    body.name = name;
+  }
+
+  if (channel_id) {
+    body.channel_id = channel_id;
+  }
+
+  if (trigger_word) {
+    body.trigger_word = trigger_word;
+  }
+
+  if (!Object.keys(body).length) {
+
+    alert('変更内容がありません');
+
+    return;
+  }
 
   try {
 
-    const res = await csrfFetch(`${API}/sets/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(body)
-    });
+    const res = await csrfFetch(
+      `${API}/sets/${id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }
+    );
 
     await checkResponse(res);
 
-    showStatus('保存しました');
+    showStatus('セットを保存しました');
+
     await loadSets();
 
-  } catch (e) {
-    showStatus(e.message, 'error');
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `保存に失敗しました: ${error.message}`,
+      'error'
+    );
   }
 }
+
+
+/* =========================================================
+   TOGGLE SET
+========================================================= */
 
 async function toggleSet(id, enabled) {
 
   try {
 
-    const res = await csrfFetch(`${API}/sets/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled })
-    });
+    const res = await csrfFetch(
+      `${API}/sets/${id}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          enabled
+        })
+      }
+    );
 
     await checkResponse(res);
 
-    showStatus(enabled ? '有効化' : '無効化');
+    showStatus(
+      enabled
+        ? 'セットを有効化しました'
+        : 'セットを無効化しました'
+    );
 
-  } catch (e) {
-    showStatus(e.message, 'error');
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `変更に失敗しました: ${error.message}`,
+      'error'
+    );
+
     await loadSets();
   }
 }
+
+
+/* =========================================================
+   DELETE SET
+========================================================= */
 
 async function deleteSet(id) {
 
-  if (!confirm('削除しますか？')) return;
+  if (!confirm('このガチャセットを削除しますか？')) {
+    return;
+  }
 
   try {
 
-    const res = await csrfFetch(`${API}/sets/${id}`, {
-      method: 'DELETE'
-    });
+    const res = await csrfFetch(
+      `${API}/sets/${id}`,
+      {
+        method: 'DELETE'
+      }
+    );
 
     await checkResponse(res);
 
-    showStatus('削除しました');
+    showStatus('セットを削除しました');
+
     await loadSets();
 
-  } catch (e) {
-    showStatus(e.message, 'error');
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `削除に失敗しました: ${error.message}`,
+      'error'
+    );
   }
 }
 
+
 /* =========================================================
-   ITEMS
+   LOAD ITEMS
 ========================================================= */
 
 async function loadItems(setId) {
 
   try {
 
-    const res = await fetch(`${API}/sets/${setId}/items`, {
-      credentials: 'include'
-    });
+    const res = await fetch(
+      `${API}/sets/${setId}/items`,
+      {
+        credentials: 'include'
+      }
+    );
 
     await checkResponse(res);
 
     const items = await res.json();
 
-    const el = $(`items-${setId}`);
+    const el =
+      $(`items-${setId}`);
+
+    if (!el) {
+      return;
+    }
+
     el.innerHTML = '<b>アイテム</b>';
 
     for (const i of items) {
 
-      el.insertAdjacentHTML('beforeend', `
+      el.insertAdjacentHTML(
+        'beforeend',
+        `
         <div class="item">
 
-          <input id="iname-${i.id}" value="${escapeAttr(i.name)}">
-          <input id="idescription-${i.id}" value="${escapeAttr(i.description ?? '')}">
-          <input id="iamount-${i.id}" type="number" value="${i.amount}">
+          <input
+            id="iname-${escapeAttr(i.id)}"
+            value="${escapeAttr(i.name)}"
+            placeholder="アイテム名"
+          >
 
-          <select id="irarity-${i.id}">
-            ${['common','uncommon','rare','epic','legend','superlegend']
-              .map(r => `<option ${i.rarity===r?'selected':''}>${r}</option>`)
-              .join('')}
+          <input
+            id="idescription-${escapeAttr(i.id)}"
+            value="${escapeAttr(i.description ?? '')}"
+            placeholder="説明"
+          >
+
+          <input
+            id="iamount-${escapeAttr(i.id)}"
+            type="number"
+            min="1"
+            value="${escapeAttr(i.amount)}"
+            placeholder="個数"
+          >
+
+          <select id="irarity-${escapeAttr(i.id)}">
+
+            ${[
+              'common',
+              'uncommon',
+              'rare',
+              'epic',
+              'legend',
+              'superlegend'
+            ].map(r => `
+              <option
+                value="${r}"
+                ${i.rarity === r ? 'selected' : ''}
+              >
+                ${r}
+              </option>
+            `).join('')}
+
           </select>
 
-          <button onclick="saveItem('${setId}','${i.id}')">保存</button>
-          <button onclick="deleteItem('${setId}','${i.id}')">削除</button>
+          <button
+            onclick="saveItem(
+              '${escapeJs(setId)}',
+              '${escapeJs(i.id)}'
+            )"
+          >
+            保存
+          </button>
+
+          <button
+            onclick="deleteItem(
+              '${escapeJs(setId)}',
+              '${escapeJs(i.id)}'
+            )"
+          >
+            削除
+          </button>
 
         </div>
-      `);
+        `
+      );
     }
 
-  } catch (e) {
-    showStatus(e.message, 'error');
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `アイテム取得に失敗しました: ${error.message}`,
+      'error'
+    );
   }
 }
 
-/* =========================================================
-   ITEM OPS
-========================================================= */
-
-async function addItem(setId) { /* 省略（元のまま） */ }
-async function saveItem(setId, itemId) { /* 省略（元のまま） */ }
-async function deleteItem(setId, itemId) { /* 省略（元のまま） */ }
 
 /* =========================================================
-   UTIL
+   ADD ITEM
 ========================================================= */
 
-function escapeHtml(v) {
-  return String(v ?? '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#039;');
+async function addItem(setId) {
+
+  const name =
+    $(`new-iname-${setId}`).value.trim();
+
+  const description =
+    $(`new-idescription-${setId}`).value.trim();
+
+  const amount =
+    Number(
+      $(`new-iamount-${setId}`).value
+    );
+
+  const rarity =
+    $(`new-irarity-${setId}`).value;
+
+
+  if (!name) {
+
+    alert('アイテム名を入力してください');
+
+    return;
+  }
+
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+
+    alert('個数は1以上にしてください');
+
+    return;
+  }
+
+
+  if (
+    ![
+      'common',
+      'uncommon',
+      'rare',
+      'epic',
+      'legend',
+      'superlegend'
+    ].includes(rarity)
+  ) {
+
+    alert('レアリティが不正です');
+
+    return;
+  }
+
+
+  try {
+
+    const res = await csrfFetch(
+      `${API}/sets/${setId}/items`,
+      {
+        method: 'POST',
+
+        body: JSON.stringify({
+          name,
+          description,
+          amount,
+          rarity
+        })
+      }
+    );
+
+    await checkResponse(res);
+
+    /*
+     * 入力欄をクリア
+     */
+    $(`new-iname-${setId}`).value = '';
+    $(`new-idescription-${setId}`).value = '';
+    $(`new-iamount-${setId}`).value = '';
+
+    showStatus('アイテムを追加しました');
+
+    /*
+     * 最新のアイテム一覧を取得
+     */
+    await loadItems(setId);
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `アイテム追加に失敗しました: ${error.message}`,
+      'error'
+    );
+  }
 }
 
-function escapeAttr(v) {
-  return escapeHtml(v);
+
+/* =========================================================
+   SAVE ITEM
+========================================================= */
+
+async function saveItem(setId, itemId) {
+
+  const name =
+    $(`iname-${itemId}`).value.trim();
+
+  const description =
+    $(`idescription-${itemId}`).value.trim();
+
+  const amount =
+    Number(
+      $(`iamount-${itemId}`).value
+    );
+
+  const rarity =
+    $(`irarity-${itemId}`).value;
+
+
+  const body = {
+    name,
+    description,
+    amount,
+    rarity
+  };
+
+
+  if (!name) {
+
+    alert('アイテム名を入力してください');
+
+    return;
+  }
+
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+
+    alert('個数は1以上にしてください');
+
+    return;
+  }
+
+
+  try {
+
+    const res = await csrfFetch(
+      `${API}/sets/${setId}/items/${itemId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }
+    );
+
+    await checkResponse(res);
+
+    showStatus('アイテムを保存しました');
+
+    await loadItems(setId);
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `アイテム保存に失敗しました: ${error.message}`,
+      'error'
+    );
+  }
 }
+
+
+/* =========================================================
+   DELETE ITEM
+========================================================= */
+
+async function deleteItem(setId, itemId) {
+
+  if (!confirm('このアイテムを削除しますか？')) {
+    return;
+  }
+
+  try {
+
+    const res = await csrfFetch(
+      `${API}/sets/${setId}/items/${itemId}`,
+      {
+        method: 'DELETE'
+      }
+    );
+
+    await checkResponse(res);
+
+    showStatus('アイテムを削除しました');
+
+    await loadItems(setId);
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `アイテム削除に失敗しました: ${error.message}`,
+      'error'
+    );
+  }
+}
+
+
+/* =========================================================
+   ESCAPE
+========================================================= */
+
+function escapeHtml(value) {
+
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+
+function escapeAttr(value) {
+  return escapeHtml(value);
+}
+
+
+function escapeJs(value) {
+
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
 
 /* =========================================================
    INIT
 ========================================================= */
 
 async function init() {
-  await loadCsrfToken();
-  await loadSets();
+
+  try {
+
+    /*
+     * 最初にCSRFトークンを取得
+     */
+    await loadCsrfToken();
+
+    /*
+     * セット一覧を取得
+     */
+    await loadSets();
+
+  } catch (error) {
+
+    console.error(error);
+
+    showStatus(
+      `初期化に失敗しました: ${error.message}`,
+      'error'
+    );
+  }
 }
+
 
 init();
 
