@@ -1137,23 +1137,28 @@ async function runGacha(message, set) {
 
     if (logError) console.error("Log insert failed:", logError);
 
-    // 【追加】[userName] の置換処理
-    // サーバー内での表示名（ニックネーム）を優先し、無ければユーザー名を取得します
     const displayName = message.author.username || "不明";
     let finalDescription = hit.description || "";
     if (finalDescription.includes("[userName]")) {
       finalDescription = finalDescription.replaceAll("[userName]", displayName);
     }
+    const formattedDescription = finalDescription.replace(/\\n/g, '\n');
+
+    const imageRegex = /(https?:\/\/[^\s]+?\.(?:jpg|jpeg|png|gif|webp)(?:\?[^\s]*)?)/i;
+    const match = formattedDescription.match(imageRegex);
+    const imageUrl = match ? match[0] : null;
 
     // 5. Embed 送信
     const embed = new EmbedBuilder()
       .setTitle(`🎰 ${set.name}`)
-      .setDescription(**${hit.name}**\n${finalDescription}) // 置換後の変数を使用
+      .setDescription(`**${hit.name}**\n${formattedDescription}`)
       .addFields({ name: 'レアリティ', value: hit.rarity, inline: true })
       .setColor(0xF1C40F);
 
+    if (imageUrl) {
+      embed.setImage(imageUrl);
+    }
     await message.reply({ embeds: [embed], allowedMentions: { repliedUser: false } });
-
   } catch (err) {
     console.error("Critical error in runGacha:", err);
   }
