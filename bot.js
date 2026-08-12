@@ -77,7 +77,9 @@ const {
   DISCORD_MOD_LOG_CHANNEL_ID,
   VPN_API_KEY,
   REDIRECT_URI,
-  shiikurole
+  shiikurole,
+  GAS_PROXY_URL,
+  GAS_SECRET_KEY
 } = process.env;
 
 if (!DISCORD_BOT_TOKEN || !DISCORD_CLIENT_ID || !DISCORD_GUILD_ID || !DISCORD_ROLE_ID || !VPN_API_KEY || !REDIRECT_URI) {
@@ -373,162 +375,707 @@ function checkRateLimit(key) {
   return arr.length <= limit;
 }
 
-/* =====================
-   UTIL
-===================== */
+/* =========================================================
+   ERROR
+========================================================= */
 
-function sha256(v) {
-  return crypto.createHash("sha256").update(v).digest("hex");
+class AuthError extends Error {
+  constructor(code, message, cause = null) {
+    super(message);
+
+    this.name = "AuthError";
+    this.code = code;
+    this.cause = cause;
+  }
+}
+
+/*
+ * ユーザーに返すエラーコード
+ *
+ * AUTH-001  認証情報不足
+ * AUTH-002  レート制限
+ * AUTH-003  VPN / Proxy / Tor / Relay
+ * AUTH-004  サブアカウント
+ * AUTH-005  Discord Token取得失敗
+ * AUTH-006  Discordユーザー取得失敗
+ * AUTH-007  Discordクライアント異常
+ * AUTH-008  Discordサーバー取得失敗
+ * AUTH-009  Discordメンバー取得失敗
+ * AUTH-010  ロール付与失敗
+ * AUTH-011  DB処理失敗
+ * AUTH-012  MODログ失敗
+ * AUTH-013  VPN APIエラー
+ * AUTH-014  OAuth設定エラー
+ * AUTH-015  GAS Proxyエラー
+ * AUTH-999  不明なエラー
+ */
+
+/* =========================================================
+   UTILS
+========================================================= */
+
+function sha256(value) {
+  return crypto
+    .createHash("sha256")
+    .update(String(value))
+    .digest("hex");
 }
 
 function normalizeIP(ip) {
   if (!ip) return null;
-  if (ip.startsWith("::ffff:")) return ip.replace("::ffff:", "");
+
+  ip = String(ip).trim();
+
+  if (ip.startsWith("::ffff:")) {
+    return ip.slice(7);
+  }
+
+  if (ip === "::1") {
+    return "127.0.0.1";
+  }
+
   return ip;
 }
 
 function extractIP(req) {
+  const forwarded = req.headers?.["x-forwarded-for"];
 
-  const fwd = req.headers["x-forwarded-for"];
+  if (forwarded) {
+    const firstIP = String(forwarded)
+      .split(",")[0]
+      .trim();
 
-  if (fwd) {
-    return normalizeIP(fwd.split(",")[0].trim());
+    return normalizeIP(firstIP);
   }
 
-  return normalizeIP(req.socket.remoteAddress);
+  return normalizeIP(
+    req.socket?.remoteAddress
+  );
 }
 
-/* =====================
+function escapeHTML(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/* =========================================================
+   SAFE ERROR
+========================================================= */
+
+function toAuthError(error) {
+  if (error instanceof AuthError) {
+    return error;
+  }
+
+  console.error(
+    "Unhandled authentication error:",
+    error
+  );
+
+  return new AuthError(
+    "AUTH-999",
+    "Unknown authentication error",
+    error
+  );
+}
+
+/* =========================================================
    VPN CHECK
-===================== */
+========================================================= */
 
 async function checkVPN(ip) {
+  if (!ip) {
+    throw new AuthError(
+      "AUTH-013",
+      "IP address unavailable"
+    );
+  }
+
+  if (!VPN_API_KEY) {
+    throw new AuthError(
+      "AUTH-013",
+      "VPN_API_KEY is not configured"
+    );
+  }
 
   try {
+    const url =
+      `https://vpnapi.io/api/${encodeURIComponent(ip)}` +
+      `?key=${encodeURIComponent(VPN_API_KEY)}`;
 
-    const res = await fetch(
-      `https://vpnapi.io/api/${ip}?key=${process.env.VPN_API_KEY}`
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new AuthError(
+        "AUTH-013",
+        `VPN API returned HTTP ${response.status}`
+      );
+    }
+
+    const data = await response.json();
+
+    const security = data?.security;
+
+    const detected = Boolean(
+      security?.vpn ||
+      security?.proxy ||
+      security?.tor ||
+      security?.relay
     );
 
-    if (!res.ok) return true;
+    return {
+      blocked: detected,
+      reason: detected
+        ? "vpn/proxy/tor/relay detected"
+        : "clean",
+      data,
+    };
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
 
-    const data = await res.json();
-
-    const s = data.security;
-
-    return Boolean(
-      s?.vpn ||
-      s?.proxy ||
-      s?.tor ||
-      s?.relay
+    throw new AuthError(
+      "AUTH-013",
+      "VPN API request failed",
+      error
     );
-
-  } catch {
-    return true;
   }
 }
 
-/* =====================
+/* =========================================================
+   GAS PROXY
+========================================================= */
+
+async function gasRequest(url, options = {}) {
+  if (!GAS_PROXY_URL) {
+    throw new AuthError(
+      "AUTH-014",
+      "GAS_PROXY_URL is not configured"
+    );
+  }
+
+  if (!GAS_SECRET_KEY) {
+    throw new AuthError(
+      "AUTH-014",
+      "GAS_SECRET_KEY is not configured"
+    );
+  }
+
+  try {
+    const response = await fetch(
+      GAS_PROXY_URL,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+
+        body: JSON.stringify({
+          secret_key: GAS_SECRET_KEY,
+
+          url,
+
+          options: {
+            method:
+              options.method || "GET",
+
+            headers:
+              options.headers || {},
+
+            ...(options.body !== undefined
+              ? {
+                  body: options.body,
+                }
+              : {}),
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new AuthError(
+        "AUTH-015",
+        `GAS Proxy HTTP ${response.status}`
+      );
+    }
+
+    let data;
+
+    try {
+      data = await response.json();
+    } catch (error) {
+      throw new AuthError(
+        "AUTH-015",
+        "Invalid GAS Proxy JSON response",
+        error
+      );
+    }
+
+    if (data?.status !== 200) {
+      throw new AuthError(
+        "AUTH-015",
+        `GAS Proxy returned ${data?.status ?? "unknown"}: ${
+          data?.body ||
+          data?.error ||
+          "unknown error"
+        }`
+      );
+    }
+
+    if (
+      typeof data.body !== "string"
+    ) {
+      throw new AuthError(
+        "AUTH-015",
+        "Invalid GAS Proxy response body"
+      );
+    }
+
+    try {
+      return JSON.parse(data.body);
+    } catch (error) {
+      throw new AuthError(
+        "AUTH-015",
+        "Failed to parse Discord API response",
+        error
+      );
+    }
+  } catch (error) {
+    if (error instanceof AuthError) {
+      throw error;
+    }
+
+    throw new AuthError(
+      "AUTH-015",
+      "GAS Proxy request failed",
+      error
+    );
+  }
+}
+
+/* =========================================================
+   DISCORD TOKEN
+========================================================= */
+
+async function exchangeDiscordCode(code) {
+  if (
+    !DISCORD_CLIENT_ID ||
+    !DISCORD_CLIENT_SECRET ||
+    !REDIRECT_URI
+  ) {
+    throw new AuthError(
+      "AUTH-014",
+      "Discord OAuth configuration is incomplete"
+    );
+  }
+
+  const basic = Buffer
+    .from(
+      `${DISCORD_CLIENT_ID}:${DISCORD_CLIENT_SECRET}`
+    )
+    .toString("base64");
+
+  const body = new URLSearchParams({
+    grant_type:
+      "authorization_code",
+
+    code,
+
+    redirect_uri:
+      REDIRECT_URI,
+  }).toString();
+
+  const token = await gasRequest(
+    "https://discord.com/api/v10/oauth2/token",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/x-www-form-urlencoded",
+
+        Authorization:
+          `Basic ${basic}`,
+      },
+
+      body,
+    }
+  );
+
+  if (!token?.access_token) {
+    throw new AuthError(
+      "AUTH-005",
+      "Discord token was not returned"
+    );
+  }
+
+  return token;
+}
+
+/* =========================================================
+   DISCORD USER
+========================================================= */
+
+async function getDiscordUser(accessToken) {
+  try {
+    const user = await gasRequest(
+      "https://discord.com/api/v10/users/@me",
+      {
+        method: "GET",
+
+        headers: {
+          Authorization:
+            `Bearer ${accessToken}`,
+        },
+      }
+    );
+
+    if (!user?.id) {
+      throw new AuthError(
+        "AUTH-006",
+        "Discord user ID was not returned"
+      );
+    }
+
+    return user;
+  } catch (error) {
+    if (error instanceof AuthError) {
+      if (error.code === "AUTH-015") {
+        throw new AuthError(
+          "AUTH-006",
+          "Discord user request failed",
+          error
+        );
+      }
+
+      throw error;
+    }
+
+    throw new AuthError(
+      "AUTH-006",
+      "Discord user request failed",
+      error
+    );
+  }
+}
+
+/* =========================================================
+   DISCORD GUILD
+========================================================= */
+
+async function fetchGuild(client) {
+  if (!client) {
+    throw new AuthError(
+      "AUTH-007",
+      "Discord client is unavailable"
+    );
+  }
+
+  if (!client.guilds) {
+    throw new AuthError(
+      "AUTH-007",
+      "Discord guild manager is unavailable"
+    );
+  }
+
+  for (
+    let attempt = 1;
+    attempt <= 5;
+    attempt++
+  ) {
+    try {
+      let guild =
+        client.guilds.cache.get(
+          GUILD_ID
+        );
+
+      if (!guild) {
+        guild =
+          await client.guilds.fetch(
+            GUILD_ID
+          );
+      }
+
+      if (guild) {
+        return guild;
+      }
+    } catch (error) {
+      console.warn(
+        `Guild fetch failed (${attempt}/5):`,
+        error
+      );
+
+      if (attempt < 5) {
+        await sleep(1500);
+      }
+    }
+  }
+
+  throw new AuthError(
+    "AUTH-008",
+    "Failed to fetch Discord guild"
+  );
+}
+
+/* =========================================================
+   DISCORD MEMBER
+========================================================= */
+
+async function fetchMember(
+  guild,
+  userId
+) {
+  for (
+    let attempt = 1;
+    attempt <= 5;
+    attempt++
+  ) {
+    try {
+      let member =
+        guild.members.cache.get(
+          userId
+        );
+
+      if (!member) {
+        member =
+          await guild.members.fetch(
+            userId
+          );
+      }
+
+      if (member) {
+        return member;
+      }
+    } catch (error) {
+      console.warn(
+        `Member fetch failed (${attempt}/5):`,
+        error
+      );
+
+      if (attempt < 5) {
+        await sleep(1500);
+      }
+    }
+  }
+
+  throw new AuthError(
+    "AUTH-009",
+    "Failed to fetch Discord member"
+  );
+}
+
+/* =========================================================
+   MOD LOG
+========================================================= */
+
+async function sendModLog(
+  guild,
+  content
+) {
+  try {
+    if (
+      !guild ||
+      !MOD_LOG_CHANNEL
+    ) {
+      return;
+    }
+
+    let channel =
+      guild.channels.cache.get(
+        MOD_LOG_CHANNEL
+      );
+
+    if (!channel) {
+      channel =
+        await guild.channels
+          .fetch(
+            MOD_LOG_CHANNEL
+          )
+          .catch(() => null);
+    }
+
+    if (
+      !channel ||
+      typeof channel.isTextBased !==
+        "function" ||
+      !channel.isTextBased()
+    ) {
+      return;
+    }
+
+    await channel.send(content);
+  } catch (error) {
+    console.error(
+      "MOD LOG ERROR:",
+      error
+    );
+  }
+}
+
+/* =========================================================
    CALLBACK
-===================== */
+========================================================= */
 
-export async function handleOAuthCallback(req, res, client) {
-
+export async function handleOAuthCallback(
+  req,
+  res,
+  client
+) {
   let ipHash = null;
   let uaHash = null;
 
+  let user = null;
+  let guild = null;
+
   try {
+    /* =====================
+       REQUEST
+    ===================== */
 
-    const code = req.query.code;
+    const code =
+      req.query?.code;
 
-    const ip = extractIP(req);
+    const ip =
+      extractIP(req);
 
-    const ua = req.headers["user-agent"] || "unknown";
+    const userAgent =
+      req.headers?.["user-agent"] ||
+      "unknown";
 
     if (!code || !ip) {
-      throw new Error("認証情報が不足しています");
+      throw new AuthError(
+        "AUTH-001",
+        "Authentication information is missing"
+      );
     }
 
     ipHash = sha256(ip);
-    uaHash = sha256(ua);
+    uaHash = sha256(userAgent);
 
-    if (!checkRateLimit(`${ipHash}:${uaHash}`)) {
+    /* =====================
+       RATE LIMIT
+    ===================== */
 
-      await insertAuthLog(null, ipHash, uaHash, "rate_limit", "too many");
-
-      throw new Error("認証試行が多すぎます");
-    }
-
-    /* TOKEN */
-
-    const basic = Buffer
-      .from(
-        `${process.env.DISCORD_CLIENT_ID}:${process.env.DISCORD_CLIENT_SECRET}`
+    if (
+      !checkRateLimit(
+        `${ipHash}:${uaHash}`
       )
-      .toString("base64");
+    ) {
+      await insertAuthLog(
+        null,
+        ipHash,
+        uaHash,
+        "rate_limit",
+        "too many authentication attempts"
+      );
 
-    const tokenRes = await fetch(
-      "https://discord.com/api/v10/oauth2/token",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Basic ${basic}`
-        },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          redirect_uri: process.env.REDIRECT_URI
-        })
-      }
-    );
-
-    const token = await tokenRes.json();
-
-    if (!token.access_token) {
-      throw new Error("Discord token取得失敗");
+      throw new AuthError(
+        "AUTH-002",
+        "Too many authentication attempts"
+      );
     }
 
-    /* USER */
+    /* =====================
+       TOKEN
+    ===================== */
 
-    const userRes = await fetch(
-      "https://discord.com/api/users/@me",
-      {
-        headers: {
-          Authorization: `Bearer ${token.access_token}`
-        }
+    const token =
+      await exchangeDiscordCode(
+        code
+      );
+
+    /* =====================
+       USER
+    ===================== */
+
+    user =
+      await getDiscordUser(
+        token.access_token
+      );
+
+    /* =====================
+       VPN
+    ===================== */
+
+    let vpnResult;
+
+    try {
+      vpnResult =
+        await checkVPN(ip);
+    } catch (error) {
+      /*
+       * VPN API自体の障害
+       */
+      if (
+        error instanceof AuthError &&
+        error.code === "AUTH-013"
+      ) {
+        await insertAuthLog(
+          user.id,
+          ipHash,
+          uaHash,
+          "vpn_api_error",
+          error.message
+        );
+
+        throw error;
       }
-    );
 
-    const user = await userRes.json();
-
-    if (!user?.id) {
-      throw new Error("ユーザー取得失敗");
+      throw error;
     }
 
-    /* VPN */
-
-    if (await checkVPN(ip)) {
-
+    if (vpnResult.blocked) {
       await insertAuthLog(
         user.id,
         ipHash,
         uaHash,
         "vpn_detected",
-        "vpn or proxy"
+        vpnResult.reason
       );
 
-      await addWarn(user.id, 1);
+      await addWarn(
+        user.id,
+        1
+      );
 
-      throw new Error("VPN / Proxy が検知されました");
+      throw new AuthError(
+        "AUTH-003",
+        "VPN / Proxy / Tor / Relay detected"
+      );
     }
 
-    /* SUB ACCOUNT */
+    /* =====================
+       SUB ACCOUNT
+    ===================== */
 
-    const owner = await findUserByIPandUA(ipHash, uaHash);
+    const owner =
+      await findUserByIPandUA(
+        ipHash,
+        uaHash
+      );
 
-    if (owner && owner !== user.id) {
-
+    if (
+      owner &&
+      owner !== user.id
+    ) {
       await insertAuthLog(
         user.id,
         ipHash,
@@ -537,88 +1084,292 @@ export async function handleOAuthCallback(req, res, client) {
         `owner:${owner}`
       );
 
-      await addWarn(user.id, 2);
+      await addWarn(
+        user.id,
+        2
+      );
 
-      throw new Error("サブアカウントの可能性があります");
-    }
-
-    /* DB */
-    await upsertUserAuth(
-      user.id,
-      user.username,
-      ipHash,
-      uaHash
-    );
-
-    await insertAuthLog(
-      user.id,
-      ipHash,
-      uaHash,
-      "auth_success",
-      "ok"
-    );
-
-    /* ROLE */
-    // 💡 修正：client や client.guilds が存在するか事前に厳格にチェックする
-    if (!client || !client.guilds) {
-      console.error("🚨 Discordクライアント(client)が正常に初期化されていない、または切断されています。");
-      throw new Error("認証システムの接続が一時的に不安定です。しばらく経ってから再度お試しください。");
-    }
-
-    // 💡 前述の通り、キャッシュ優先で取得する（レートリミット対策も兼ねる）
-    let guild = client.guilds.cache.get(process.env.GUILD_ID);
-    if (!guild) {
-      guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
-    }
-
-    if (!guild) {
-      throw new Error("指定されたDiscordサーバーが見つかりません。ボットがサーバーに導入されているか確認してください。");
-    }
-
-    let member = guild.members.cache.get(user.id);
-    if (!member) {
-      member = await guild.members.fetch(user.id).catch(() => null);
-    }
-
-    if (!member) {
-      throw new Error("指定されたDiscordサーバーにあなたが参加していません");
-    }
-
-    if (!member.roles.cache.has(process.env.ROLE_ID)) {
-      await member.roles.add(process.env.ROLE_ID);
-    }
-
-    
-    /* MOD LOG */
-
-    const mod = await guild.channels.fetch(process.env.MOD_LOG_CHANNEL);
-
-    if (mod?.isTextBased()) {
-      mod.send(
-`🛡 AUTH SUCCESS
-user: ${user.username}
-id: ${user.id}
-ip: ${ipHash.slice(0,8)}
-ua: ${uaHash.slice(0,8)}`
+      throw new AuthError(
+        "AUTH-004",
+        "Possible sub account detected"
       );
     }
-    res.send(`<h1>認証完了 🎉 ${user.username}</h1>`);
-  } catch (e) {
-    try {
-      const guild = await client.guilds.fetch(process.env.GUILD_ID);
-      const mod = await guild.channels.fetch(process.env.MOD_LOG_CHANNEL);
 
-      if (mod?.isTextBased()) {
-        mod.send(
-`🚫 AUTH FAILED
-reason: ${e.message}
-ip: ${ipHash?.slice(0,8) ?? "unknown"}`
+    /* =====================
+       DISCORD
+    ===================== */
+
+    guild =
+      await fetchGuild(client);
+
+    const member =
+      await fetchMember(
+        guild,
+        user.id
+      );
+
+    /* =====================
+       ROLE
+    ===================== */
+
+    if (!ROLE_ID) {
+      throw new AuthError(
+        "AUTH-014",
+        "ROLE_ID is not configured"
+      );
+    }
+
+    const hasRole =
+      member.roles?.cache?.has(
+        ROLE_ID
+      );
+
+    if (!hasRole) {
+      try {
+        await member.roles.add(
+          ROLE_ID,
+          "OAuth authentication completed"
+        );
+      } catch (error) {
+        console.error(
+          "ROLE ADD ERROR:",
+          error
+        );
+
+        throw new AuthError(
+          "AUTH-010",
+          "Failed to add Discord role",
+          error
         );
       }
-    } catch {}
-    res
-      .status(403)
-      .send(`<h1>認証失敗</h1><p>${e.message}</p>`);
+    }
+
+    /* =====================
+       DB
+    ===================== */
+
+    try {
+      await upsertUserAuth(
+        user.id,
+        user.username,
+        ipHash,
+        uaHash
+      );
+
+      await insertAuthLog(
+        user.id,
+        ipHash,
+        uaHash,
+        "auth_success",
+        "ok"
+      );
+    } catch (error) {
+      console.error(
+        "DATABASE ERROR:",
+        error
+      );
+
+      throw new AuthError(
+        "AUTH-011",
+        "Database operation failed",
+        error
+      );
+    }
+
+    /* =====================
+       MOD LOG
+    ===================== */
+
+    await sendModLog(
+      guild,
+`🛡️ AUTH SUCCESS
+user: ${user.username}
+id: ${user.id}
+ip: ${ipHash.slice(0, 8)}
+ua: ${uaHash.slice(0, 8)}`
+    );
+
+    /* =====================
+       SUCCESS
+    ===================== */
+
+    if (!res.headersSent) {
+      res
+        .status(200)
+        .send(`
+          <!DOCTYPE html>
+          <html lang="ja">
+          <head>
+            <meta charset="UTF-8">
+            <meta
+              name="viewport"
+              content="width=device-width,initial-scale=1"
+            >
+            <title>認証完了</title>
+          </head>
+
+          <body>
+            <h1>認証完了 🎉</h1>
+
+            <p>
+              ${escapeHTML(
+                user.username
+              )}
+            </p>
+          </body>
+          </html>
+        `);
+    }
+
+  } catch (error) {
+    /* =====================================================
+       ERROR HANDLING
+    ===================================================== */
+
+    const authError =
+      toAuthError(error);
+
+    /*
+     * 詳細はサーバーログだけ
+     */
+    console.error(
+      `[${authError.code}]`,
+      authError.message,
+      authError.cause || ""
+    );
+
+    /* =====================
+       AUTH LOG
+    ===================== */
+
+    try {
+      await insertAuthLog(
+        user?.id ?? null,
+        ipHash,
+        uaHash,
+        "auth_failed",
+        `${authError.code}: ${authError.message}`
+      );
+    } catch (logError) {
+      console.error(
+        "AUTH LOG ERROR:",
+        logError
+      );
+    }
+
+    /* =====================
+       MOD LOG
+    ===================== */
+
+    try {
+      if (!guild && client) {
+        guild =
+          client.guilds?.cache?.get(
+            GUILD_ID
+          ) ||
+          await client.guilds
+            ?.fetch(GUILD_ID)
+            .catch(() => null);
+      }
+
+      await sendModLog(
+        guild,
+`🚫 AUTH FAILED
+code: ${authError.code}
+reason: ${authError.message}
+user: ${user?.username ?? "unknown"}
+id: ${user?.id ?? "unknown"}
+ip: ${ipHash?.slice(0, 8) ?? "unknown"}
+ua: ${uaHash?.slice(0, 8) ?? "unknown"}`
+      );
+    } catch (logError) {
+      console.error(
+        "FAILED MOD LOG ERROR:",
+        logError
+      );
+    }
+
+    /* =====================
+       USER RESPONSE
+    ===================== */
+
+    /*
+     * ここが重要。
+     *
+     * ユーザーにはreasonを絶対に出さず、
+     * エラーコードだけ表示する。
+     */
+
+    if (!res.headersSent) {
+      res
+        .status(403)
+        .send(`
+          <!DOCTYPE html>
+          <html lang="ja">
+          <head>
+            <meta charset="UTF-8">
+            <meta
+              name="viewport"
+              content="width=device-width,initial-scale=1"
+            >
+            <title>認証失敗</title>
+
+            <style>
+              body {
+                margin: 0;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: #0a0a0c;
+                color: #fff;
+                font-family:
+                  system-ui,
+                  -apple-system,
+                  BlinkMacSystemFont,
+                  sans-serif;
+              }
+
+              .error {
+                text-align: center;
+              }
+
+              h1 {
+                margin-bottom: 12px;
+              }
+
+              .code {
+                font-family: monospace;
+                font-size: 18px;
+                opacity: .8;
+              }
+
+              .description {
+                margin-top: 20px;
+                opacity: .55;
+                font-size: 14px;
+              }
+            </style>
+          </head>
+
+          <body>
+            <div class="error">
+              <h1>認証失敗</h1>
+
+              <div class="code">
+                ${escapeHTML(
+                  authError.code
+                )}
+              </div>
+
+              <div class="description">
+                このエラーコードを管理者に伝えてください。
+              </div>
+            </div>
+          </body>
+          </html>
+        `);
+    }
   }
 }
 
