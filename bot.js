@@ -802,16 +802,10 @@ async function fetchGuild(client) {
     attempt++
   ) {
     try {
-      let guild =
-        client.guilds.cache.get(
-          GUILD_ID
-        );
+      let guild = client.guilds.cache.get(DISCORD_GUILD_ID);
 
       if (!guild) {
-        guild =
-          await client.guilds.fetch(
-            GUILD_ID
-          );
+        guild = await client.guilds.fetch(DISCORD_GUILD_ID);
       }
 
       if (guild) {
