@@ -559,12 +559,35 @@ export async function handleOAuthCallback(req, res, client) {
     );
 
     /* ROLE */
-    const guild = await client.guilds.fetch(process.env.GUILD_ID);
-    const member = await guild.members.fetch(user.id);
+    // 💡 修正：client や client.guilds が存在するか事前に厳格にチェックする
+    if (!client || !client.guilds) {
+      console.error("🚨 Discordクライアント(client)が正常に初期化されていない、または切断されています。");
+      throw new Error("認証システムの接続が一時的に不安定です。しばらく経ってから再度お試しください。");
+    }
+
+    // 💡 前述の通り、キャッシュ優先で取得する（レートリミット対策も兼ねる）
+    let guild = client.guilds.cache.get(process.env.GUILD_ID);
+    if (!guild) {
+      guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+    }
+
+    if (!guild) {
+      throw new Error("指定されたDiscordサーバーが見つかりません。ボットがサーバーに導入されているか確認してください。");
+    }
+
+    let member = guild.members.cache.get(user.id);
+    if (!member) {
+      member = await guild.members.fetch(user.id).catch(() => null);
+    }
+
+    if (!member) {
+      throw new Error("指定されたDiscordサーバーにあなたが参加していません");
+    }
 
     if (!member.roles.cache.has(process.env.ROLE_ID)) {
       await member.roles.add(process.env.ROLE_ID);
     }
+
     
     /* MOD LOG */
 
