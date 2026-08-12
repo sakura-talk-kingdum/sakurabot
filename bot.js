@@ -590,16 +590,12 @@ async function gasRequest(url, options = {}) {
 
         body: JSON.stringify({
           secret_key: GAS_SECRET_KEY,
-
           url,
-
           options: {
             method:
               options.method || "GET",
-
             headers:
               options.headers || {},
-
             ...(options.body !== undefined
               ? {
                   body: options.body,
@@ -887,7 +883,7 @@ async function sendModLog(
   try {
     if (
       !guild ||
-      !MOD_LOG_CHANNEL
+      !DISCORD_MOD_LOG_CHANNEL
     ) {
       return;
     }
@@ -901,7 +897,7 @@ async function sendModLog(
       channel =
         await guild.channels
           .fetch(
-            MOD_LOG_CHANNEL
+            DISCORD_MOD_LOG_CHANNEL
           )
           .catch(() => null);
     }
@@ -1115,13 +1111,13 @@ export async function handleOAuthCallback(
 
     const hasRole =
       member.roles?.cache?.has(
-        ROLE_ID
+        DISCORD_ROLE_ID
       );
 
     if (!hasRole) {
       try {
         await member.roles.add(
-          ROLE_ID,
+          DISCORD_ROLE_ID,
           "OAuth authentication completed"
         );
       } catch (error) {
