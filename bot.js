@@ -2164,7 +2164,6 @@ client.once('ready', async () => {
     // フラグを反転させて次回切り替える
     showPing = !showPing;
   }, 5000); // 5000ミリ秒 = 5秒
-});
 
 setInterval(async () => {
   try {
@@ -2222,6 +2221,7 @@ setInterval(async () => {
       status: 'online'
     });
   }, 10000);
+
 setInterval(
   () => {
     cleanupExpiredAuthJobs()
