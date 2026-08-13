@@ -2100,15 +2100,71 @@ cron.schedule(
   { timezone: "Asia/Tokyo" }
 );
 
+// グローバル変数で今日の記念日を保持する
+let currentAnniversary = "データ取得中...";
+
+// RPCを更新する関数（APIから最新データを取得）
+async function fetchAnniversary() {
+  try {
+    const today = new Date();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mmdd = mm + dd;
+
+    const response = await fetch(`https://example.com{mmdd}`);
+    const data = await response.json();
+
+    if (data?.anniv1) {
+      currentAnniversary = `今日は${data.anniv1}`;
+      console.log(`[${new Date().toISOString()}] 記念日データを更新: ${currentAnniversary}`);
+    } else {
+      currentAnniversary = "今日は特別な記念日はありません";
+    }
+  } catch (error) {
+    console.error('記念日の取得に失敗しました:', error);
+    currentAnniversary = "データ取得エラー";
+  }
+}
+
 // ready
 client.once('ready', async () => {
   console.log(`Bot logged in as ${client.user.tag}`);
-  const ping = Math.round(client.ws.ping);
 
-  client.user.setPresence({
-    activities: [{ name: `Ping: ${ping}ms`, type: 0 }],
-     status: 'online'
+  // 1. 起動時に一度だけ今日のデータを取得
+  await fetchAnniversary();
+
+  // 2. 毎日 00:00 に今日のデータを自動更新
+  cron.schedule('0 0 * * *', async () => {
+    await fetchAnniversary();
+  }, {
+    scheduled: true,
+    timezone: "Asia/Tokyo"
   });
+
+  // 3. 5秒ごとに表示を交互に切り替えるループ処理
+  let showPing = true; // 切り替えのフラグ
+
+  setInterval(() => {
+    const ping = Math.round(client.ws.ping);
+
+    if (showPing) {
+      // Pingを表示
+      client.user.setPresence({
+        activities: [{ name: `Ping: ${ping}ms`, type: 0 }],
+        status: 'online'
+      });
+    } else {
+      // 記念日を表示
+      client.user.setPresence({
+        activities: [{ name: currentAnniversary, type: 0 }],
+        status: 'online'
+      });
+    }
+
+    // フラグを反転させて次回切り替える
+    showPing = !showPing;
+  }, 5000); // 5000ミリ秒 = 5秒
+});
 
 setInterval(async () => {
   try {
