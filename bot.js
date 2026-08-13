@@ -883,21 +883,21 @@ async function sendModLog(
   try {
     if (
       !guild ||
-      !DISCORD_MOD_LOG_CHANNEL
+      !DISCORD_MOD_LOG_CHANNEL_ID
     ) {
       return;
     }
 
     let channel =
       guild.channels.cache.get(
-        MOD_LOG_CHANNEL
+        DISCORD_MOD_LOG_CHANNEL_ID
       );
 
     if (!channel) {
       channel =
         await guild.channels
           .fetch(
-            DISCORD_MOD_LOG_CHANNEL
+            DISCORD_MOD_LOG_CHANNEL_ID
           )
           .catch(() => null);
     }
@@ -1102,7 +1102,7 @@ export async function handleOAuthCallback(
        ROLE
     ===================== */
 
-    if (!ROLE_ID) {
+    if (!DISCORD_ROLE_ID) {
       throw new AuthError(
         "AUTH-014",
         "ROLE_ID is not configured"
