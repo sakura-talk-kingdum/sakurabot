@@ -1255,10 +1255,10 @@ ua: ${uaHash.slice(0, 8)}`
       if (!guild && client) {
         guild =
           client.guilds?.cache?.get(
-            GUILD_ID
+            DISCORD_GUILD_ID
           ) ||
           await client.guilds
-            ?.fetch(GUILD_ID)
+            ?.fetch(DISCORD_GUILD_ID)
             .catch(() => null);
       }
 
