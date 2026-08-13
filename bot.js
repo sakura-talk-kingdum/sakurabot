@@ -2128,43 +2128,140 @@ async function fetchAnniversary() {
 }
 
 // ready
+// 誕生日リストの定義
+const birthdayList = `
+1/14 <@491366362401472542>
+1/20 <@1420014043929772164>
+1/24 <@1045237100200599592>
+1/28 こたん
+1/29 <@714664119290167367>
+2/1 <@1381623544609378404>
+2/17 <@789089480538718239>
+2/23 <@1205901901632381082> 
+3/2 <@863447391033884694>
+3/4 <@1488820982973206741>
+3/29 まめっち
+4/2 <@1036090691383726122>
+4/4 <@1160552148237549569>
+5/12 <@840218968018387014>
+5/19 <@1119594568590045224>
+6/2 <@982966507229302794>
+6/4 <@1160095924324937849>
+6/9 <@1114529711519956992>
+6/23 <@1281500772500242466>
+6/27 <@1169288848967208980>
+6/29 <@1099098129338466385> 
+7/2 <@780319649857929237>
+7/22 ぬこさま
+7/23/12:19 <@1305450084271394848>
+7/29 <@1373249661594370139>
+7/30 <@1275233053601435703>
+8/8 <@1393473542695424071>
+8/14 TMT
+8/18 mink
+9/7 鴉見
+9/16 <@1089222363238912152>
+9/30 <@1192061786892021780> 
+10/8 <@1210470307995983932>
+10/16 <@1051413492768456794>
+10/29 <@1314584245863452672>
+11/6 <@1144202102214774874>
+11/8 <@1150684199045566576>
+11/17 <@1045237100200599592>
+11/22 <@827738933709504542>
+11/23 <@1343054861243256897>
+11/28 memeカールおじさん
+11/29 <@1170566384468635748>
+12/7 <@1457092004600221946>
+12/12 <@1422186145801965682>
+12/17 <@1267669329739255879>
+12/20 ボブ
+12/28 イルミナ
+`;
+
+let currentAnniversary = "記念日なし";
+let todayBirthdayInfo = ""; // 今日誕生日の人の名前を保持する変数
+
+// 誕生日リストをパースして今日の人を探す関数
+async function updateBirthdayInfo() {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const date = now.getDate();
+  const todayKey = `${month}/${date}`; // "8/13" のような形式
+
+  const lines = birthdayList.trim().split('\n');
+  const members = [];
+
+  for (const line of lines) {
+    if (line.startsWith(todayKey)) {
+      // 日付の後の名前/メンション部分を抽出
+      const namePart = line.replace(todayKey, "").trim();
+      const idMatch = namePart.match(/<@!?(\d+)>/);
+
+      if (idMatch) {
+        const userId = idMatch[1];
+        // 全てのサーバーからユーザーを探してニックネーム/表示名を取得
+        const user = client.users.cache.get(userId);
+        if (user) {
+          // Botがアクセスできるサーバー内のメンバー情報を探す
+          let displayName = user.username;
+          for (const guild of client.guilds.cache.values()) {
+            const member = await guild.members.fetch(userId).catch(() => null);
+            if (member) {
+              displayName = member.displayName;
+              break;
+            }
+          }
+          members.push(displayName);
+        } else {
+          members.push(`ID:${userId}`);
+        }
+      } else {
+        members.push(namePart); // ID形式じゃない場合はそのまま
+      }
+    }
+  }
+
+  todayBirthdayInfo = members.length > 0 ? `🎂 ${members.join(', ')}` : "";
+}
+
 client.once('ready', async () => {
   console.log(`Bot logged in as ${client.user.tag}`);
 
-  // 1. 起動時に一度だけ今日のデータを取得
+  // 1. 起動時にデータを取得
   await fetchAnniversary();
+  await updateBirthdayInfo();
 
-  // 2. 毎日 00:00 に今日のデータを自動更新
+  // 2. 毎日 00:00 に更新
   cron.schedule('0 0 * * *', async () => {
     await fetchAnniversary();
+    await updateBirthdayInfo();
   }, {
     scheduled: true,
     timezone: "Asia/Tokyo"
   });
 
-  // 3. 5秒ごとに表示を交互に切り替えるループ処理
-  let showPing = true; // 切り替えのフラグ
+  // 3. 5秒ごとに表示を交互に切り替える
+  let showPing = true;
 
   setInterval(() => {
     const ping = Math.round(client.ws.ping);
 
     if (showPing) {
-      // Pingを表示
       client.user.setPresence({
         activities: [{ name: `Ping: ${ping}ms`, type: 0 }],
         status: 'online'
       });
     } else {
-      // 記念日を表示
+      // 「記念日 ＋ 誕生日の人」を表示
+      const statusText = `${currentAnniversary} ${todayBirthdayInfo}`.trim();
       client.user.setPresence({
-        activities: [{ name: currentAnniversary, type: 0 }],
+        activities: [{ name: statusText , type: 0 }],
         status: 'online'
       });
     }
-
-    // フラグを反転させて次回切り替える
     showPing = !showPing;
-  }, 5000); // 5000ミリ秒 = 5秒
+  }, 5000);
 
 setInterval(async () => {
   try {
