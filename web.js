@@ -176,6 +176,508 @@ async function requireAdminuser(req, res, next) {
   next();
 }
 
+/* =========================================================
+   AUTH LOADING PAGE
+========================================================= */
+
+export function handleAuthLoading(req, res) {
+  const job = req.query?.job;
+
+  if (!job) {
+    return res.status(400).send(`
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+  <title>認証エラー</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      background: #0a0a0c;
+      color: #fff;
+
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    .card {
+      width: min(420px, calc(100% - 40px));
+      padding: 40px 28px;
+
+      text-align: center;
+
+      background: #16161a;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 20px;
+
+      box-shadow:
+        0 20px 60px rgba(0,0,0,.4);
+    }
+
+    .icon {
+      width: 56px;
+      height: 56px;
+
+      margin: 0 auto 20px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border-radius: 50%;
+
+      background: rgba(255,80,80,.12);
+      color: #ff6b6b;
+
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: 24px;
+    }
+
+    .code {
+      font-family: monospace;
+      font-size: 20px;
+      color: #aaa;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+    <div class="icon">!</div>
+
+    <h1>認証失敗</h1>
+
+    <div class="code">
+      AUTH-001
+    </div>
+  </div>
+
+</body>
+</html>
+`);
+  }
+
+  const safeJob =
+    String(job)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+
+  if (!safeJob) {
+    return res.status(400).send(`
+      <h1>認証失敗</h1>
+      <p>AUTH-001</p>
+    `);
+  }
+
+  return res.status(200).send(`
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  >
+
+  <meta
+    name="robots"
+    content="noindex,nofollow"
+  >
+
+  <title>認証中...</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      background: #0a0a0c;
+      color: #fff;
+
+      font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+    }
+
+    .card {
+      width: min(420px, calc(100% - 40px));
+
+      padding: 48px 28px;
+
+      text-align: center;
+
+      background: #16161a;
+
+      border:
+        1px solid
+        rgba(255,255,255,.08);
+
+      border-radius: 20px;
+
+      box-shadow:
+        0 20px 60px
+        rgba(0,0,0,.4);
+    }
+
+    .spinner {
+      width: 54px;
+      height: 54px;
+
+      margin:
+        0 auto 28px;
+
+      border:
+        4px solid
+        rgba(255,255,255,.1);
+
+      border-top-color:
+        #5865f2;
+
+      border-radius: 50%;
+
+      animation:
+        spin .8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    h1 {
+      margin: 0 0 12px;
+
+      font-size: 25px;
+      font-weight: 700;
+    }
+
+    p {
+      margin: 0;
+
+      color: #aaa;
+      font-size: 15px;
+    }
+
+    .sub {
+      margin-top: 22px;
+
+      color: #666;
+      font-size: 13px;
+    }
+
+    .error {
+      display: none;
+    }
+
+    .error-icon {
+      width: 56px;
+      height: 56px;
+
+      margin:
+        0 auto 20px;
+
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      border-radius: 50%;
+
+      background:
+        rgba(255,80,80,.12);
+
+      color: #ff6b6b;
+
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .error-code {
+      margin-top: 14px;
+
+      font-family: monospace;
+
+      font-size: 20px;
+
+      color: #aaa;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="card">
+
+    <!-- LOADING -->
+
+    <div id="loading">
+
+      <div class="spinner"></div>
+
+      <h1>
+        認証中…
+      </h1>
+
+      <p>
+        Discordアカウントを確認しています
+      </p>
+
+      <div class="sub">
+        このページを閉じないでください
+      </div>
+
+    </div>
+
+
+    <!-- ERROR -->
+
+    <div id="error" class="error">
+
+      <div class="error-icon">
+        !
+      </div>
+
+      <h1>
+        認証失敗
+      </h1>
+
+      <div
+        id="errorCode"
+        class="error-code"
+      >
+        AUTH-999
+      </div>
+
+      <div class="sub">
+        このエラーコードを管理者に伝えてください。
+      </div>
+
+    </div>
+
+  </div>
+
+
+<script>
+const job =
+  ${JSON.stringify(safeJob)};
+
+let finished = false;
+
+async function checkStatus() {
+
+  if (finished) {
+    return;
+  }
+
+  try {
+
+    const response =
+      await fetch(
+        "/auth/status?job=" +
+        encodeURIComponent(job),
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Accept":
+              "application/json"
+          }
+        }
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        "HTTP " +
+        response.status
+      );
+    }
+
+    const data =
+      await response.json();
+
+
+    /*
+     * 認証中
+     */
+
+    if (
+      data.status ===
+      "processing"
+    ) {
+
+      setTimeout(
+        checkStatus,
+        1000
+      );
+
+      return;
+    }
+
+
+    /*
+     * 成功
+     */
+
+    if (
+      data.status ===
+      "success"
+    ) {
+
+      finished = true;
+
+      document.body.innerHTML = \`
+        <div class="card">
+          <div
+            style="
+              width:56px;
+              height:56px;
+              margin:0 auto 20px;
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              border-radius:50%;
+              background:rgba(87,242,135,.12);
+              color:#57f287;
+              font-size:28px;
+            "
+          >
+            ✓
+          </div>
+
+          <h1>
+            認証完了
+          </h1>
+
+          <p>
+            Discordアカウントの認証が完了しました。
+          </p>
+        </div>
+      \`;
+
+      return;
+    }
+
+
+    /*
+     * 失敗
+     */
+
+    if (
+      data.status ===
+      "failed"
+    ) {
+
+      finished = true;
+
+      document
+        .getElementById("loading")
+        .style.display =
+        "none";
+
+      document
+        .getElementById("error")
+        .style.display =
+        "block";
+
+      document
+        .getElementById("errorCode")
+        .textContent =
+        data.errorCode ||
+        "AUTH-999";
+
+      return;
+    }
+
+
+    /*
+     * 不明なステータス
+     */
+
+    finished = true;
+
+    document
+      .getElementById("loading")
+      .style.display =
+      "none";
+
+    document
+      .getElementById("error")
+      .style.display =
+      "block";
+
+    document
+      .getElementById("errorCode")
+      .textContent =
+      "AUTH-999";
+
+  } catch (error) {
+
+    console.error(
+      "Auth status error:",
+      error
+    );
+
+    /*
+     * 一時的な通信エラーなら
+     * 認証失敗にはしない。
+     */
+
+    if (!finished) {
+
+      setTimeout(
+        checkStatus,
+        1500
+      );
+
+    }
+  }
+}
+
+checkStatus();
+</script>
+
+</body>
+</html>
+`);
+}
+
 // 認証ページ
 app.get('/auth/', cors(), (req, res) => {
   const state = createOAuthState(res, 'auth_oauth_state');
@@ -346,7 +848,15 @@ app.get('/auth/callback', cors(), oauthCallbackLimiter, (req, res) => {
     handleOAuthCallback(req, res, client); 
 });
 
+app.get(
+  "/auth/loading",
+  handleAuthLoading
+);
 
+app.get(
+  "/auth/status",
+  handleAuthStatus
+);
 
 // ===== 管理画面 =====
 app.get("/admins", requireAdminuser, csrfProtection, cors(), async (req, res) => {
