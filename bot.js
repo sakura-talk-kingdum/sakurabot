@@ -59,7 +59,8 @@ import {
   getAuthJob,
   updateAuthJob,
   clearAuthJobCode,
-  deleteAuthJob
+  deleteAuthJob,
+  cleanupExpiredAuthJobs
 } from "./db.js";
 import { commands } from "./lib/command/command.js";
 import { handleInteractionCreate } from "./lib/interaction/interactionCreate.js";
