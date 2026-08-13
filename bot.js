@@ -54,8 +54,12 @@ import {
   getPinnedByChannel,
   upsertPinned,
   deletePinned,
-  addWarn
-
+  addWarn,
+  createAuthJob,
+  getAuthJob,
+  updateAuthJob,
+  clearAuthJobCode,
+  deleteAuthJob
 } from "./db.js";
 import { commands } from "./lib/command/command.js";
 import { handleInteractionCreate } from "./lib/interaction/interactionCreate.js";
@@ -929,17 +933,7 @@ export async function handleOAuthCallback(
   res,
   client
 ) {
-  let ipHash = null;
-  let uaHash = null;
-
-  let user = null;
-  let guild = null;
-
   try {
-    /* =====================
-       REQUEST
-    ===================== */
-
     const code =
       req.query?.code;
 
@@ -957,8 +951,11 @@ export async function handleOAuthCallback(
       );
     }
 
-    ipHash = sha256(ip);
-    uaHash = sha256(userAgent);
+    const ipHash =
+      sha256(ip);
+
+    const uaHash =
+      sha256(userAgent);
 
     /* =====================
        RATE LIMIT
@@ -984,19 +981,105 @@ export async function handleOAuthCallback(
     }
 
     /* =====================
+       AUTH JOB
+    ===================== */
+
+    const jobId =
+      await createAuthJob({
+        oauthCode: code,
+        ip,
+        ipHash,
+        uaHash
+      });
+
+    /*
+     * 認証処理を待たない。
+     */
+    processOAuthAuthentication(
+      jobId,
+      client
+    ).catch((error) => {
+      console.error(
+        "OAuth background error:",
+        error
+      );
+    });
+
+    /*
+     * 即Loading画面へ。
+     */
+    return res.redirect(
+      `/auth/loading?job=${encodeURIComponent(jobId)}`
+    );
+
+  } catch (error) {
+    const authError =
+      toAuthError(error);
+
+    console.error(
+      `[${authError.code}]`,
+      authError.message,
+      authError.cause || ""
+    );
+
+    if (!res.headersSent) {
+      return res
+        .status(403)
+        .send(
+          createErrorHTML(
+            authError.code
+          )
+        );
+    }
+  }
+}
+
+async function processOAuthAuthentication(
+  jobId,
+  client
+) {
+  const job =
+    await getAuthJob(jobId);
+
+  if (!job) {
+    return;
+  }
+
+  try {
+    /*
+     * 期限確認
+     */
+    if (
+      new Date(job.expires_at)
+        .getTime() <= Date.now()
+    ) {
+      throw new AuthError(
+        "AUTH-999",
+        "Authentication job expired"
+      );
+    }
+
+    const {
+      oauth_code,
+      ip,
+      ip_hash,
+      ua_hash
+    } = job;
+
+    /* =====================
        TOKEN
     ===================== */
 
     const token =
       await exchangeDiscordCode(
-        code
+        oauth_code
       );
 
     /* =====================
        USER
     ===================== */
 
-    user =
+    const user =
       await getDiscordUser(
         token.access_token
       );
@@ -1005,38 +1088,14 @@ export async function handleOAuthCallback(
        VPN
     ===================== */
 
-    let vpnResult;
-
-    try {
-      vpnResult =
-        await checkVPN(ip);
-    } catch (error) {
-      /*
-       * VPN API自体の障害
-       */
-      if (
-        error instanceof AuthError &&
-        error.code === "AUTH-013"
-      ) {
-        await insertAuthLog(
-          user.id,
-          ipHash,
-          uaHash,
-          "vpn_api_error",
-          error.message
-        );
-
-        throw error;
-      }
-
-      throw error;
-    }
+    const vpnResult =
+      await checkVPN(ip);
 
     if (vpnResult.blocked) {
       await insertAuthLog(
         user.id,
-        ipHash,
-        uaHash,
+        ip_hash,
+        ua_hash,
         "vpn_detected",
         vpnResult.reason
       );
@@ -1058,8 +1117,8 @@ export async function handleOAuthCallback(
 
     const owner =
       await findUserByIPandUA(
-        ipHash,
-        uaHash
+        ip_hash,
+        ua_hash
       );
 
     if (
@@ -1068,8 +1127,8 @@ export async function handleOAuthCallback(
     ) {
       await insertAuthLog(
         user.id,
-        ipHash,
-        uaHash,
+        ip_hash,
+        ua_hash,
         "sub_account",
         `owner:${owner}`
       );
@@ -1086,10 +1145,10 @@ export async function handleOAuthCallback(
     }
 
     /* =====================
-       DISCORD
+       GUILD
     ===================== */
 
-    guild =
+    const guild =
       await fetchGuild(client);
 
     const member =
@@ -1109,23 +1168,17 @@ export async function handleOAuthCallback(
       );
     }
 
-    const hasRole =
-      member.roles?.cache?.has(
+    if (
+      !member.roles.cache.has(
         DISCORD_ROLE_ID
-      );
-
-    if (!hasRole) {
+      )
+    ) {
       try {
         await member.roles.add(
           DISCORD_ROLE_ID,
           "OAuth authentication completed"
         );
       } catch (error) {
-        console.error(
-          "ROLE ADD ERROR:",
-          error
-        );
-
         throw new AuthError(
           "AUTH-010",
           "Failed to add Discord role",
@@ -1142,23 +1195,19 @@ export async function handleOAuthCallback(
       await upsertUserAuth(
         user.id,
         user.username,
-        ipHash,
-        uaHash
+        ip_hash,
+        ua_hash
       );
 
       await insertAuthLog(
         user.id,
-        ipHash,
-        uaHash,
+        ip_hash,
+        ua_hash,
         "auth_success",
         "ok"
       );
-    } catch (error) {
-      console.error(
-        "DATABASE ERROR:",
-        error
-      );
 
+    } catch (error) {
       throw new AuthError(
         "AUTH-011",
         "Database operation failed",
@@ -1175,191 +1224,163 @@ export async function handleOAuthCallback(
 `🛡️ AUTH SUCCESS
 user: ${user.username}
 id: ${user.id}
-ip: ${ipHash.slice(0, 8)}
-ua: ${uaHash.slice(0, 8)}`
+ip: ${ip_hash.slice(0, 8)}
+ua: ${ua_hash.slice(0, 8)}`
     );
 
     /* =====================
-       SUCCESS
+       JOB SUCCESS
     ===================== */
 
-    if (!res.headersSent) {
-      res
-        .status(200)
-        .send(`
-          <!DOCTYPE html>
-          <html lang="ja">
-          <head>
-            <meta charset="UTF-8">
-            <meta
-              name="viewport"
-              content="width=device-width,initial-scale=1"
-            >
-            <title>認証完了</title>
-          </head>
+    await updateAuthJob(
+      jobId,
+      {
+        status: "success",
+        userId: user.id,
+        username: user.username
+      }
+    );
 
-          <body>
-            <h1>認証完了 🎉</h1>
-
-            <p>
-              ${escapeHTML(
-                user.username
-              )}
-            </p>
-          </body>
-          </html>
-        `);
-    }
+    /*
+     * OAuth codeと生IPを消す
+     */
+    await clearAuthJobCode(
+      jobId
+    );
 
   } catch (error) {
-    /* =====================================================
-       ERROR HANDLING
-    ===================================================== */
 
     const authError =
       toAuthError(error);
 
-    /*
-     * 詳細はサーバーログだけ
-     */
     console.error(
       `[${authError.code}]`,
       authError.message,
       authError.cause || ""
     );
 
-    /* =====================
-       AUTH LOG
-    ===================== */
-
     try {
-      await insertAuthLog(
-        user?.id ?? null,
-        ipHash,
-        uaHash,
-        "auth_failed",
-        `${authError.code}: ${authError.message}`
+      await updateAuthJob(
+        jobId,
+        {
+          status: "failed",
+          errorCode:
+            authError.code
+        }
       );
-    } catch (logError) {
+
+      await clearAuthJobCode(
+        jobId
+      );
+
+    } catch (dbError) {
       console.error(
-        "AUTH LOG ERROR:",
-        logError
+        "AUTH JOB UPDATE ERROR:",
+        dbError
       );
     }
 
-    /* =====================
-       MOD LOG
-    ===================== */
+    throw authError;
+  }
+}
 
-    try {
-      if (!guild && client) {
-        guild =
-          client.guilds?.cache?.get(
-            DISCORD_GUILD_ID
-          ) ||
-          await client.guilds
-            ?.fetch(DISCORD_GUILD_ID)
-            .catch(() => null);
-      }
+export async function handleAuthStatus(
+  req,
+  res
+) {
+  try {
+    const jobId =
+      req.query?.job;
 
-      await sendModLog(
-        guild,
-`🚫 AUTH FAILED
-code: ${authError.code}
-reason: ${authError.message}
-user: ${user?.username ?? "unknown"}
-id: ${user?.id ?? "unknown"}
-ip: ${ipHash?.slice(0, 8) ?? "unknown"}
-ua: ${uaHash?.slice(0, 8) ?? "unknown"}`
-      );
-    } catch (logError) {
-      console.error(
-        "FAILED MOD LOG ERROR:",
-        logError
-      );
+    if (!jobId) {
+      return res
+        .status(400)
+        .json({
+          status: "failed",
+          errorCode: "AUTH-001"
+        });
     }
 
-    /* =====================
-       USER RESPONSE
-    ===================== */
+    const job =
+      await getAuthJob(jobId);
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({
+          status: "failed",
+          errorCode: "AUTH-999"
+        });
+    }
 
     /*
-     * ここが重要。
-     *
-     * ユーザーにはreasonを絶対に出さず、
-     * エラーコードだけ表示する。
+     * 期限切れ
      */
+    if (
+      new Date(job.expires_at)
+        .getTime() <= Date.now()
+    ) {
+      await deleteAuthJob(
+        jobId
+      );
 
-    if (!res.headersSent) {
-      res
-        .status(403)
-        .send(`
-          <!DOCTYPE html>
-          <html lang="ja">
-          <head>
-            <meta charset="UTF-8">
-            <meta
-              name="viewport"
-              content="width=device-width,initial-scale=1"
-            >
-            <title>認証失敗</title>
-
-            <style>
-              body {
-                margin: 0;
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                background: #0a0a0c;
-                color: #fff;
-                font-family:
-                  system-ui,
-                  -apple-system,
-                  BlinkMacSystemFont,
-                  sans-serif;
-              }
-
-              .error {
-                text-align: center;
-              }
-
-              h1 {
-                margin-bottom: 12px;
-              }
-
-              .code {
-                font-family: monospace;
-                font-size: 18px;
-                opacity: .8;
-              }
-
-              .description {
-                margin-top: 20px;
-                opacity: .55;
-                font-size: 14px;
-              }
-            </style>
-          </head>
-
-          <body>
-            <div class="error">
-              <h1>認証失敗</h1>
-
-              <div class="code">
-                ${escapeHTML(
-                  authError.code
-                )}
-              </div>
-
-              <div class="description">
-                このエラーコードを管理者に伝えてください。
-              </div>
-            </div>
-          </body>
-          </html>
-        `);
+      return res.json({
+        status: "failed",
+        errorCode: "AUTH-999"
+      });
     }
+
+    /* =====================
+       PROCESSING
+    ===================== */
+
+    if (
+      job.status ===
+      "processing"
+    ) {
+      return res.json({
+        status: "processing"
+      });
+    }
+
+    /* =====================
+       SUCCESS
+    ===================== */
+
+    if (
+      job.status ===
+      "success"
+    ) {
+      return res.json({
+        status: "success",
+        username:
+          job.username ?? null
+      });
+    }
+
+    /* =====================
+       FAILED
+    ===================== */
+
+    return res.json({
+      status: "failed",
+      errorCode:
+        job.error_code ||
+        "AUTH-999"
+    });
+
+  } catch (error) {
+    console.error(
+      "AUTH STATUS ERROR:",
+      error
+    );
+
+    return res
+      .status(500)
+      .json({
+        status: "failed",
+        errorCode: "AUTH-999"
+      });
   }
 }
 
@@ -2145,6 +2166,11 @@ setInterval(async () => {
       status: 'online'
     });
   }, 10000);
+setInterval(
+  () => {
+    cleanupExpiredAuthJobs()
+      .catch(console.error);
+  }, 60 * 1000);
 });
 
 client.login(DISCORD_BOT_TOKEN)
