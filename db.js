@@ -16,6 +16,178 @@ export const supabase = createClient(
 /* =====================
     USERS & AUTH
 ===================== */
+/* =====================
+    AUTH JOBS
+===================== */
+
+/**
+ * OAuth認証ジョブを作成
+ *
+ * OAuth codeは認証処理が終わるまで一時保存する。
+ * expires_atはデフォルト5分。
+ */
+export async function createAuthJob({
+  oauthCode,
+  ip,
+  ipHash,
+  uaHash,
+  expiresInMs = 5 * 60 * 1000
+}) {
+  const now = new Date();
+  const expiresAt = new Date(
+    now.getTime() + expiresInMs
+  );
+
+  const { data, error } = await supabase
+    .from("auth_jobs")
+    .insert({
+      status: "processing",
+
+      oauth_code: oauthCode,
+      ip,
+      ip_hash: ipHash,
+      ua_hash: uaHash,
+
+      created_at: now.toISOString(),
+      updated_at: now.toISOString(),
+      expires_at: expiresAt.toISOString()
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+
+  return data.id;
+}
+
+
+/**
+ * 認証ジョブ取得
+ */
+export async function getAuthJob(jobId) {
+  const { data, error } = await supabase
+    .from("auth_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return data ?? null;
+}
+
+
+/**
+ * 認証ジョブ更新
+ */
+export async function updateAuthJob(
+  jobId,
+  updates
+) {
+  const {
+    status,
+    userId,
+    username,
+    errorCode,
+    oauthCode,
+    ip,
+    ipHash,
+    uaHash
+  } = updates;
+
+  const updateData = {
+    updated_at: new Date().toISOString()
+  };
+
+  if (status !== undefined) {
+    updateData.status = status;
+  }
+
+  if (userId !== undefined) {
+    updateData.user_id = userId;
+  }
+
+  if (username !== undefined) {
+    updateData.username = username;
+  }
+
+  if (errorCode !== undefined) {
+    updateData.error_code = errorCode;
+  }
+
+  if (oauthCode !== undefined) {
+    updateData.oauth_code = oauthCode;
+  }
+
+  if (ip !== undefined) {
+    updateData.ip = ip;
+  }
+
+  if (ipHash !== undefined) {
+    updateData.ip_hash = ipHash;
+  }
+
+  if (uaHash !== undefined) {
+    updateData.ua_hash = uaHash;
+  }
+
+  const { error } = await supabase
+    .from("auth_jobs")
+    .update(updateData)
+    .eq("id", jobId);
+
+  if (error) throw error;
+}
+
+
+/**
+ * OAuth codeを削除
+ *
+ * 認証が終わったらcodeを残さない。
+ */
+export async function clearAuthJobCode(jobId) {
+  const { error } = await supabase
+    .from("auth_jobs")
+    .update({
+      oauth_code: null,
+      ip: null,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", jobId);
+
+  if (error) throw error;
+}
+
+
+/**
+ * 認証ジョブ削除
+ */
+export async function deleteAuthJob(jobId) {
+  const { error } = await supabase
+    .from("auth_jobs")
+    .delete()
+    .eq("id", jobId);
+
+  if (error) throw error;
+}
+
+
+/**
+ * 期限切れジョブ削除
+ *
+ * readyイベントやcronから定期的に呼んでもOK。
+ */
+export async function cleanupExpiredAuthJobs() {
+  const { error } = await supabase
+    .from("auth_jobs")
+    .delete()
+    .lt(
+      "expires_at",
+      new Date().toISOString()
+    );
+
+  if (error) throw error;
+}
 
 export async function upsertUserAuth(userId, username, ipHash, uaHash) {
   const { error } = await supabase
