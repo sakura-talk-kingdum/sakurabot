@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import path from'path';
 dotenv.config();
 import { supabase } from "./db.js";
-import { handleOAuthCallback, client, voiceStates } from './bot.js';
+import { handleOAuthCallback, client, voiceStates, handleAuthLoading, handleAuthStatus } from './bot.js';
 import cors from 'cors';
 import csurf from 'csurf';
 import rateLimit from 'express-rate-limit';
