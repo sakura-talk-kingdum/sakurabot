@@ -2111,7 +2111,7 @@ async function fetchAnniversary() {
     const dd = String(today.getDate()).padStart(2, '0');
     const mmdd = mm + dd;
 
-    const response = await fetch(`https://example.com{mmdd}`);
+    const response = await fetch(`https://api.whatistoday.cyou/index.cgi/v3/anniv/${mmdd}`);
     const data = await response.json();
 
     if (data?.anniv1) {
