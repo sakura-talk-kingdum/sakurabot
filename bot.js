@@ -2179,7 +2179,7 @@ const birthdayList = `
 12/28 イルミナ
 `;
 
-let currentAnniversary = "記念日なし";
+currentAnniversary = "記念日なし";
 let todayBirthdayInfo = ""; // 今日誕生日の人の名前を保持する変数
 
 // 誕生日リストをパースして今日の人を探す関数
