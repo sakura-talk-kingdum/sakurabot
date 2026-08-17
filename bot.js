@@ -1389,7 +1389,7 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
 (async () => {
   try {
-    console.log("スラッシュコマンド登録中...");
+    console.log("グローバルコマンド登録中...");
 
     const body = commands.map(cmd =>
       typeof cmd.toJSON === "function" ? cmd.toJSON() : cmd
@@ -1397,19 +1397,19 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     console.log(body);
     
     await rest.put(
-      Routes.applicationGuildCommands(DISCORD_CLIENT_ID,DISCORD_GUILD_ID),
+      Routes.applicationCommands(DISCORD_CLIENT_ID),
       { body }
     );
 
-    console.log("✅ コマンド登録完了");
+    console.log("✅ グローバルコマンド登録完了");
   } catch (err) {
     console.error("❌ コマンド登録失敗:", err);
     commands.forEach(cmd => {
-      console.error('壊れてるコマンド:', cmd.name, err);
+      console.error('壊れてるコマンド:', cmd.name);
     });
-
   }
-});
+})(); 
+
 
 // pinned table check note: with Supabase you'd usually create tables via migration
 async function ensurePinnedTableExists() {
