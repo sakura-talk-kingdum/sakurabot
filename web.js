@@ -53,6 +53,16 @@ function createOAuthState(res, cookieName) {
   return state;
 }
 
+const restrictIpForOdai = (req, res, next) => {
+    // trust proxyが1なので、req.ipに正しいクライアントIPが入ります
+    const clientIp = req.ip; 
+
+    if (clientIp && clientIp.includes('126.0.31.180')) {
+        return res.status(503).send('Service Unavailable');
+    }
+    next();
+};
+
 function verifyOAuthState(req, res, cookieName) {
   const expected = req.cookies[cookieName];
   const actual = typeof req.query.state === 'string' ? req.query.state : '';
@@ -1190,7 +1200,7 @@ app.get("/status", cors(), (_, res) => {
 });
 
 // 📌 /odai → HTML直書き + お題追加フォーム
-app.get("/odai", cors(), (req, res) => {
+app.get("/odai", restrictIpForOdai, cors(), (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   const forwarded = req.headers['x-forwarded-for'];
   const clientIp = forwarded ? forwarded.split(',')[0] : req.socket.remoteAddress;
