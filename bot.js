@@ -1389,26 +1389,37 @@ const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
 
 (async () => {
   try {
+    console.log("古いギルドコマンドを削除中...");
+    await rest.put(
+      Routes.applicationGuildCommands(DISCORD_CLIENT_ID, DISCORD_GUILD_ID),
+      { body: [] }
+    );
+    console.log("✅ 古いギルドコマンドの削除完了");
+
     console.log("グローバルコマンド登録中...");
 
     const body = commands.map(cmd =>
       typeof cmd.toJSON === "function" ? cmd.toJSON() : cmd
     );
-    console.log(body);
+    
+    console.log("送信するデータ:", JSON.stringify(body, null, 2));
     
     await rest.put(
       Routes.applicationCommands(DISCORD_CLIENT_ID),
       { body }
     );
 
-    console.log("✅ グローバルコマンド登録完了");
+    console.log("✅ グローバルコマンド登録完了！");
+    console.log("※グローバルコマンドがDiscord全体に反映されるまで、最大で数分〜1時間ほどかかる場合があります。");
+
   } catch (err) {
     console.error("❌ コマンド登録失敗:", err);
-    commands.forEach(cmd => {
-      console.error('壊れてるコマンド:', cmd.name);
-    });
+    
+    if (err.rawError && err.rawError.errors) {
+      console.error("具体的なエラー原因:", JSON.stringify(err.rawError.errors, null, 2));
+    }
   }
-})(); 
+})();
 
 
 // pinned table check note: with Supabase you'd usually create tables via migration
