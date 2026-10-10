@@ -1,0 +1,38 @@
+name: Dependabot Automation
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronized]
+
+# グレーアウト対策として、ワークフローに直接書き込み権限を与えます
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    # 念のためDependabotが作成したPRのときだけ実行されるよう制限します
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      # 1. Dependabotのメタデータ（アップデートの種類など）を取得
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # 2. PRを自動で承認（Approve）する
+      - name: Approve a PR
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3. 自動マージ（Auto-merge）を有効化する
+      # CIテスト（Status Check）を設定している場合は、テスト通過後に自動マージされます
+      - name: Enable auto-merge for Dependabot PRs
+        run: gh pr merge --auto --merge "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
