@@ -1,17 +1,19 @@
-import { createClient } from "@supabase/supabase-js";
+import pg from "pg";
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+// pg.Pool の初期化
+// 環境変数 DATABASE_URL (postgres://user:pass@localhost:5432/dbname) があればそれを優先、
+// なければ個別の環境変数から自動的に読み込みます。
+const poolConfig = process.env.DATABASE_URL
+  ? { connectionString: process.env.DATABASE_URL }
+  : {
+      user: process.env.PGUSER,
+      host: process.env.PGHOST,
+      database: process.env.PGDATABASE,
+      password: process.env.PGPASSWORD,
+      port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
+    };
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  throw new Error("SUPABASE_URL or SUPABASE_SERVICE_KEY is not set");
-}
-
-export const supabase = createClient(
-  SUPABASE_URL,
-  SUPABASE_SERVICE_KEY,
-  { auth: { persistSession: false } }
-);
+export const db = new pg.Pool(poolConfig);
 
 /* =====================
     USERS & AUTH
@@ -22,9 +24,6 @@ export const supabase = createClient(
 
 /**
  * OAuth認証ジョブを作成
- *
- * OAuth codeは認証処理が終わるまで一時保存する。
- * expires_atはデフォルト5分。
  */
 export async function createAuthJob({
   oauthCode,
@@ -38,44 +37,49 @@ export async function createAuthJob({
     now.getTime() + expiresInMs
   );
 
-  const { data, error } = await supabase
-    .from("auth_jobs")
-    .insert({
-      status: "processing",
+  const query = `
+    INSERT INTO auth_jobs (
+      status, oauth_code, ip, ip_hash, ua_hash, created_at, updated_at, expires_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    RETURNING id;
+  `;
 
-      oauth_code: oauthCode,
-      ip,
-      ip_hash: ipHash,
-      ua_hash: uaHash,
+  const values = [
+    "processing",
+    oauthCode,
+    ip,
+    ipHash,
+    uaHash,
+    now.toISOString(),
+    now.toISOString(),
+    expiresAt.toISOString()
+  ];
 
-      created_at: now.toISOString(),
-      updated_at: now.toISOString(),
-      expires_at: expiresAt.toISOString()
-    })
-    .select("id")
-    .single();
-
-  if (error) throw error;
-
-  return data.id;
+  try {
+    const res = await db.query(query, values);
+    return res.rows.id;
+  } catch (error) {
+    throw error;
+  }
 }
-
 
 /**
  * 認証ジョブ取得
  */
 export async function getAuthJob(jobId) {
-  const { data, error } = await supabase
-    .from("auth_jobs")
-    .select("*")
-    .eq("id", jobId)
-    .maybeSingle();
+  const query = `
+    SELECT * FROM auth_jobs 
+    WHERE id = $1 
+    LIMIT 1;
+  `;
 
-  if (error) throw error;
-
-  return data ?? null;
+  try {
+    const res = await db.query(query, [jobId]);
+    return res.rows ?? null;
+  } catch (error) {
+    throw error;
+  }
 }
-
 
 /**
  * 認証ジョブ更新
@@ -95,142 +99,131 @@ export async function updateAuthJob(
     uaHash
   } = updates;
 
-  const updateData = {
-    updated_at: new Date().toISOString()
-  };
+  const fields = ["updated_at = \$1"];
+  const values = [new Date().toISOString()];
+  let index = 2;
 
-  if (status !== undefined) {
-    updateData.status = status;
+  if (status !== undefined) { fields.push(`status = $${index++}`); values.push(status); }
+  if (userId !== undefined) { fields.push(`user_id = $${index++}`); values.push(userId); }
+  if (username !== undefined) { fields.push(`username = $${index++}`); values.push(username); }
+  if (errorCode !== undefined) { fields.push(`error_code = $${index++}`); values.push(errorCode); }
+  if (oauthCode !== undefined) { fields.push(`oauth_code = $${index++}`); values.push(oauthCode); }
+  if (ip !== undefined) { fields.push(`ip = $${index++}`); values.push(ip); }
+  if (ipHash !== undefined) { fields.push(`ip_hash = $${index++}`); values.push(ipHash); }
+  if (uaHash !== undefined) { fields.push(`ua_hash = $${index++}`); values.push(uaHash); }
+
+  values.push(jobId);
+  const query = `
+    UPDATE auth_jobs 
+    SET ${fields.join(", ")} 
+    WHERE id = $${index};
+  `;
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
   }
-
-  if (userId !== undefined) {
-    updateData.user_id = userId;
-  }
-
-  if (username !== undefined) {
-    updateData.username = username;
-  }
-
-  if (errorCode !== undefined) {
-    updateData.error_code = errorCode;
-  }
-
-  if (oauthCode !== undefined) {
-    updateData.oauth_code = oauthCode;
-  }
-
-  if (ip !== undefined) {
-    updateData.ip = ip;
-  }
-
-  if (ipHash !== undefined) {
-    updateData.ip_hash = ipHash;
-  }
-
-  if (uaHash !== undefined) {
-    updateData.ua_hash = uaHash;
-  }
-
-  const { error } = await supabase
-    .from("auth_jobs")
-    .update(updateData)
-    .eq("id", jobId);
-
-  if (error) throw error;
 }
-
 
 /**
  * OAuth codeを削除
- *
- * 認証が終わったらcodeを残さない。
  */
 export async function clearAuthJobCode(jobId) {
-  const { error } = await supabase
-    .from("auth_jobs")
-    .update({
-      oauth_code: null,
-      ip: null,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", jobId);
+  const query = `
+    UPDATE auth_jobs 
+    SET oauth_code = NULL, ip = NULL, updated_at = $1 
+    WHERE id = $2;
+  `;
 
-  if (error) throw error;
+  try {
+    await db.query(query, [new Date().toISOString(), jobId]);
+  } catch (error) {
+    throw error;
+  }
 }
-
 
 /**
  * 認証ジョブ削除
  */
 export async function deleteAuthJob(jobId) {
-  const { error } = await supabase
-    .from("auth_jobs")
-    .delete()
-    .eq("id", jobId);
+  const query = `
+    DELETE FROM auth_jobs 
+    WHERE id = $1;
+  `;
 
-  if (error) throw error;
+  try {
+    await db.query(query, [jobId]);
+  } catch (error) {
+    throw error;
+  }
 }
-
 
 /**
  * 期限切れジョブ削除
- *
- * readyイベントやcronから定期的に呼んでもOK。
  */
 export async function cleanupExpiredAuthJobs() {
-  const { error } = await supabase
-    .from("auth_jobs")
-    .delete()
-    .lt(
-      "expires_at",
-      new Date().toISOString()
-    );
+  const query = `
+    DELETE FROM auth_jobs 
+    WHERE expires_at < $1;
+  `;
 
-  if (error) throw error;
+  try {
+    await db.query(query, [new Date().toISOString()]);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function upsertUserAuth(userId, username, ipHash, uaHash) {
-  const { error } = await supabase
-    .from("users")
-    .upsert({
-      user_id: userId,
-      username: username,
-      ip_hash: ipHash,
-      ua_hash: uaHash,
-      last_timestamp: new Date().toISOString()
-    }, {
-      onConflict: "user_id"
-    });
+  const query = `
+    INSERT INTO users (user_id, username, ip_hash, ua_hash, last_timestamp)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (user_id) 
+    DO UPDATE SET 
+      username = EXCLUDED.username,
+      ip_hash = EXCLUDED.ip_hash,
+      ua_hash = EXCLUDED.ua_hash,
+      last_timestamp = EXCLUDED.last_timestamp;
+  `;
 
-  if (error) throw error;
+  const values = [userId, username, ipHash, uaHash, new Date().toISOString()];
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function findUserByIPandUA(ipHash, uaHash) {
-  const { data, error } = await supabase
-    .from("users")
-    .select("user_id")
-    .eq("ip_hash", ipHash)
-    .eq("ua_hash", uaHash)
-    .limit(1)
-    .maybeSingle();
+  const query = `
+    SELECT user_id FROM users 
+    WHERE ip_hash = $1 AND ua_hash = $2 
+    LIMIT 1;
+  `;
 
-  if (error) throw error;
-  return data?.user_id ?? null;
+  try {
+    const res = await db.query(query, [ipHash, uaHash]);
+    return res.rows?.user_id ?? null;
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function insertAuthLog(userId, ipHash, uaHash, type, detail) {
-  const { error } = await supabase
-    .from("auth_logs")
-    .insert({
-      user_id: userId,
-      ip_hash: ipHash,
-      ua_hash: uaHash,
-      type: type,
-      detail: detail,
-      created_at: new Date().toISOString()
-    });
+  const query = `
+    INSERT INTO auth_logs (user_id, ip_hash, ua_hash, type, detail, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6);
+  `;
 
-  if (error) throw error; // 呼び出し元でハンドリングできるよう throw を推奨
+  const values = [userId, ipHash, uaHash, type, detail, new Date().toISOString()];
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 /* =====================
@@ -238,24 +231,20 @@ export async function insertAuthLog(userId, ipHash, uaHash, type, detail) {
 ===================== */
 
 /**
- * 警告回数をインクリメント (RPCを使用しない場合、安全なインクリメントは以下)
+ * 警告回数をインクリメント
  */
 export async function addWarn(userId, amount = 1) {
-  // Supabaseのupdateで直接加算（rpcを使わない場合）
-  const { data, error: fetchError } = await supabase
-    .from("users")
-    .select("warn")
-    .eq("user_id", userId)
-    .maybeSingle();
+  const query = `
+    UPDATE users 
+    SET warn = COALESCE(warn, 0) + $1 
+    WHERE user_id = $2;
+  `;
 
-  if (fetchError) throw fetchError;
-
-  const { error } = await supabase
-    .from("users")
-    .update({ warn: (data?.warn ?? 0) + amount })
-    .eq("user_id", userId);
-
-  if (error) throw error;
+  try {
+    await db.query(query, [amount, userId]);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function insertModerationLog({
@@ -266,19 +255,27 @@ export async function insertModerationLog({
   reason = null,
   durationMs = null
 }) {
-  const { error } = await supabase
-    .from("moderation_logs")
-    .insert({
-      guild_id: guildId,
-      target_user_id: targetUserId,
-      moderator_user_id: moderatorUserId,
-      action,
-      reason,
-      duration_ms: durationMs,
-      created_at: new Date().toISOString()
-    });
+  const query = `
+    INSERT INTO moderation_logs (
+      guild_id, target_user_id, moderator_user_id, action, reason, duration_ms, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7);
+  `;
 
-  if (error) throw error;
+  const values = [
+    guildId, 
+    targetUserId, 
+    moderatorUserId, 
+    action, 
+    reason, 
+    durationMs, 
+    new Date().toISOString()
+  ];
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 /* =====================
@@ -292,42 +289,54 @@ export async function upsertTimeoutContinuation({
   targetUntil,
   nextApplyAt
 }) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .upsert({
-      guild_id: guildId,
-      target_user_id: targetUserId,
-      reason,
-      target_until: targetUntil,
-      next_apply_at: nextApplyAt,
-      updated_at: new Date().toISOString()
-    }, { 
-      onConflict: "guild_id,target_user_id" 
-    });
+  const query = `
+    INSERT INTO timeout_continuations (
+      guild_id, target_user_id, reason, target_until, next_apply_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (guild_id, target_user_id) 
+    DO UPDATE SET 
+      reason = EXCLUDED.reason,
+      target_until = EXCLUDED.target_until,
+      next_apply_at = EXCLUDED.next_apply_at,
+      updated_at = EXCLUDED.updated_at;
+  `;
 
-  if (error) throw error;
+  const values = [guildId, targetUserId, reason, targetUntil, nextApplyAt, new Date().toISOString()];
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function deleteTimeoutContinuation(guildId, targetUserId) {
-  const { error } = await supabase
-    .from("timeout_continuations")
-    .delete()
-    .eq("guild_id", guildId)
-    .eq("target_user_id", targetUserId);
+  const query = `
+    DELETE FROM timeout_continuations 
+    WHERE guild_id = $1 AND target_user_id = $2;
+  `;
 
-  if (error) throw error;
+  try {
+    await db.query(query, [guildId, targetUserId]);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function listDueTimeoutContinuations(nowIso = new Date().toISOString()) {
-  const { data, error } = await supabase
-    .from("timeout_continuations")
-    .select("*")
-    .lte("next_apply_at", nowIso)
-    .order("next_apply_at", { ascending: true })
-    .limit(100);
+  const query = `
+    SELECT * FROM timeout_continuations 
+    WHERE next_apply_at <= $1 
+    ORDER BY next_apply_at ASC 
+    LIMIT 100;
+  `;
 
-  if (error) throw error;
-  return data ?? [];
+  try {
+    const res = await db.query(query, [nowIso]);
+    return res.rows ?? [];
+  } catch (error) {
+    throw error;
+  }
 }
 
 /* =====================
@@ -335,37 +344,50 @@ export async function listDueTimeoutContinuations(nowIso = new Date().toISOStrin
 ===================== */
 
 export async function getPinnedByChannel(channel_id) {
-  const { data, error } = await supabase
-    .from("pinned_messages")
-    .select("*")
-    .eq("channel_id", channel_id)
-    .maybeSingle();
+  const query = `
+    SELECT * FROM pinned_messages 
+    WHERE channel_id = $1 
+    LIMIT 1;
+  `;
 
-  if (error) throw error;
-  return data ?? null;
+  try {
+    const res = await db.query(query, [channel_id]);
+    return res.rows ?? null;
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function upsertPinned(channel_id, message_id, content, author_name) {
-  const { error } = await supabase
-    .from("pinned_messages")
-    .upsert({
-      channel_id,
-      message_id,
-      content,
-      author_name,
-      updated_at: new Date().toISOString()
-    }, { 
-      onConflict: "channel_id" 
-    });
+  const query = `
+    INSERT INTO pinned_messages (channel_id, message_id, content, author_name, updated_at)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (channel_id) 
+    DO UPDATE SET 
+      message_id = EXCLUDED.message_id,
+      content = EXCLUDED.content,
+      author_name = EXCLUDED.author_name,
+      updated_at = EXCLUDED.updated_at;
+  `;
 
-  if (error) throw error;
+  const values = [channel_id, message_id, content, author_name, new Date().toISOString()];
+
+  try {
+    await db.query(query, values);
+  } catch (error) {
+    throw error;
+  }
 }
 
 export async function deletePinned(channel_id) {
-  const { error } = await supabase
-    .from("pinned_messages")
-    .delete()
-    .eq("channel_id", channel_id);
+  const query = `
+    DELETE FROM pinned_messages 
+    WHERE channel_id = $1;
+  `;
 
-  if (error) throw error;
+  try {
+    await db.query(query, [channel_id]);
+  } catch (error) {
+    throw error;
+  }
 }
