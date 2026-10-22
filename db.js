@@ -1,8 +1,6 @@
 import pg from "pg";
 
 // pg.Pool の初期化
-// 環境変数 DATABASE_URL (postgres://user:pass@localhost:5432/dbname) があればそれを優先、
-// なければ個別の環境変数から自動的に読み込みます。
 const poolConfig = process.env.DATABASE_URL
   ? { connectionString: process.env.DATABASE_URL }
   : {
@@ -14,6 +12,80 @@ const poolConfig = process.env.DATABASE_URL
     };
 
 export const db = new pg.Pool(poolConfig);
+
+/**
+ * 既存の Supabase メソッドチェーンを pg (SQL) に自動変換するラッパー
+ */
+class SupabaseToPgWrapper {
+  constructor(tableName) {
+    this.tableName = tableName;
+    this.fields = "*";
+    this.whereClauses = [];
+    this.params = [];
+    this.paramIndex = 1;
+    this.orderByClause = "";
+    this.limitClause = "";
+  }
+
+  // .select("id, name")
+  select(fields = "*") {
+    this.fields = fields;
+    return this;
+  }
+
+  // .eq("guild_id", value)
+  eq(column, value) {
+    this.whereClauses.push(`${column} = $${this.paramIndex++}`);
+    this.params.push(value);
+    return this;
+  }
+
+  // .ilike("name", "%value%")
+  ilike(column, pattern) {
+    this.whereClauses.push(`${column} ILIKE $${this.paramIndex++}`);
+    this.params.push(pattern);
+    return this;
+  }
+
+  // .order("created_at", { ascending: false })
+  order(column, options = { ascending: true }) {
+    const dir = options.ascending ? "ASC" : "DESC";
+    this.orderByClause = `ORDER BY ${column} ${dir}`;
+    return this;
+  }
+
+  // .limit(10)
+  limit(count) {
+    this.limitClause = `LIMIT ${count}`;
+    return this;
+  }
+
+  // await で呼び出されたときに自動でSQLを実行する魔法のメソッド
+  async then(onfulfilled, onrejected) {
+    let sql = `SELECT ${this.fields} FROM ${this.tableName}`;
+    
+    if (this.whereClauses.length > 0) {
+      sql += ` WHERE ${this.whereClauses.join(" AND ")}`;
+    }
+    if (this.orderByClause) sql += ` ${this.orderByClause}`;
+    if (this.limitClause) sql += ` ${this.limitClause}`;
+
+    try {
+      const res = await db.query(sql, this.params);
+      // Supabaseの戻り値オブジェクト { data, error } を完全に再現
+      return onfulfilled({ data: res.rows, error: null });
+    } catch (error) {
+      if (onrejected) return onrejected(error);
+      return onfulfilled({ data: null, error: error });
+    }
+  }
+}
+
+// 既存のコードが「supabase.from("テーブル名")」の形で呼べるようにするダミーオブジェクト
+export const supabase = {
+  from: (tableName) => new SupabaseToPgWrapper(tableName)
+};
+
 
 /* =====================
     USERS & AUTH
