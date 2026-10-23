@@ -1611,4 +1611,21 @@ app.use((req,res) => {
 });
 
 app.use(express.static("public"));
+
+app.use((req, res, next) => {
+  res.redirect(`https://${req.headers.host}${req.url}`);
+});
+const HPORT = 80
+
+const httpApp = express();
+httpApp.use((req, res, next) => {
+  res.redirect(`https://${req.headers.host}${req.url}`);
+});
+const httpa = http.createServer(httpApp);
+
+// HTTPサーバーを起動する
+httpa.listen(HPORT, () => {
+  console.log(`HTTPはHTTPSに自動リダイレクトしています`);
+});
+
 apps.listen(PORT, () => console.log(`Web server running on port ${PORT}`));
