@@ -1,4 +1,5 @@
 import express from 'express';
+import https from 'https';
 import bodyParser from 'body-parser';
 import cookieParser from "cookie-parser";
 import dotenv from 'dotenv';
@@ -11,7 +12,15 @@ import cors from 'cors';
 import csurf from 'csurf';
 import rateLimit from 'express-rate-limit';
 
+
 const app = express();
+
+const privateKey = fs.readFileSync('key.pem', 'utf8');
+const certificate = fs.readFileSync('cert.pem', 'utf8');
+const credentials = { key: privateKey, cert: certificate };
+
+const apps = https.createServer(credentials, app);
+
 const oauthCallbackLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // max 10 callback requests per IP per window
@@ -1602,4 +1611,4 @@ app.use((req,res) => {
 });
 
 app.use(express.static("public"));
-app.listen(PORT, () => console.log(`Web server running on port ${PORT}`));
+apps.listen(PORT, () => console.log(`Web server running on port ${PORT}`));
