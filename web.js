@@ -28,7 +28,7 @@ app.post('/process', csrfProtection, (req, res) => {
   res.send('data is being processed');
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 443;
 
 /* =====================
   基本設定
@@ -270,7 +270,7 @@ export function handleAuthLoading(req, res) {
     .code {
       font-family: monospace;
       font-size: 20px;
-      color: #aaa;
+      color: #aaa;                                                          
     }
   </style>
 </head>
