@@ -1,10 +1,22 @@
 import process from 'node:process';
 import { URL } from 'node:url';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { loadEvents } from './util/loaders.js';
 
 // Initialize the client
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMembers,
+		GatewayIntentBits.GuildModeration,
+		GatewayIntentBits.GuildVoiceStates,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.DirectMessages,
+		GatewayIntentBits.MessageContent,
+	],
+	// Needed to receive direct messages
+	partials: [Partials.Channel, Partials.Message],
+});
 
 // Load the events and commands
 const events = await loadEvents(new URL('events/', import.meta.url));
