@@ -16,7 +16,7 @@
    "dependencies": {
     "discord.js": "^14.27.0",
     "express": "^5.2.1",
-    "body-parser": "^2.3.0",
+    "body-parser": "^2.4.0",
     "@neondatabase/serverless": "^1.0.0",
     "@supabase/supabase-js": "^2.81.1",
     "dotenv": "^16.3.1",
